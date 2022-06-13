@@ -61,7 +61,6 @@ type suspectSet struct {
 }
 
 func (s *suspectSet) insert(entry string) {
-
 	// evict the first entry if the set is full
 	for uint64(len(s.entries)) >= s.max && s.max != 0 {
 		s.entries = s.entries[1:]
@@ -86,7 +85,7 @@ type groupCollection struct {
 	cursor  int
 }
 
-//select_random_entries returns n entries from groupCollection
+// select_random_entries returns n entries from groupCollection
 func (g *groupCollection) select_random_entries(n int) []EndpointCriteria {
 	// it uses the cursor index to select the entries, to ensure that entries are unique
 	// and not repeating
@@ -101,7 +100,7 @@ func (g *groupCollection) select_random_entries(n int) []EndpointCriteria {
 	return nbr
 }
 
-//AttestationPuller pulls attestation blocks from remote ordering nodes.
+// AttestationPuller pulls attestation blocks from remote ordering nodes.
 // Its operations are not thread safe.
 type AttestationPuller struct {
 	Config FetcherConfig
@@ -134,13 +133,12 @@ func (p *AttestationPuller) closeEndpoints() {
 	p.openConnections = nil
 }
 
-//Close closes the attestation puller connections.
+// Close closes the attestation puller connections.
 func (p *AttestationPuller) Close() {
 	p.closeEndpoints()
 }
 
 func (p *AttestationPuller) pullAttestationBlock(ec EndpointCriteria, env *common.Envelope) (*orderer.BlockAttestation, error) {
-
 	// The connection should be via closed via Close() method of AttestationPuller
 	conn, err := p.Config.Dialer.Dial(ec)
 	if err != nil {
@@ -215,7 +213,6 @@ func (stream *impatientAttestationStream) abort() {
 // Recv blocks until a response is received from the stream or the
 // timeout expires.
 func (stream *impatientAttestationStream) Recv() (*ab.BlockAttestationResponse, error) {
-
 	// Initialize a timeout to cancel the stream when it expires
 	timeout := time.NewTimer(stream.waitTimeout)
 	defer timeout.Stop()
@@ -266,14 +263,14 @@ func newImpatientStream(conn *grpc.ClientConn, waitTimeout time.Duration, in *co
 	}, nil
 }
 
-//PullAttestation pulls an attestation Block from an orderer endpoint
+// PullAttestation pulls an attestation Block from an orderer endpoint
 func (p *AttestationPuller) PullAttestation(seq uint64) (*orderer.BlockAttestation, error) {
 	if len(p.Config.Endpoints) == 0 {
 		p.Logger.Errorf("No endpoints set")
 		return nil, errors.Errorf("no endpoints set")
 	}
 
-	//It supports pulling from only one endpoint at a time
+	// It supports pulling from only one endpoint at a time
 	ec := p.Config.Endpoints[0]
 
 	p.Logger.Infof("Sending request for attestation block [%d] to [%s]", seq, ec.Endpoint)
@@ -286,7 +283,7 @@ func (p *AttestationPuller) PullAttestation(seq uint64) (*orderer.BlockAttestati
 	return p.pullAttestationBlock(ec, env)
 }
 
-//FetcherConfig stores the configuration parameters needed to create a BlockFetcher
+// FetcherConfig stores the configuration parameters needed to create a BlockFetcher
 type FetcherConfig struct {
 	Channel      string
 	Signer       identity.SignerSerializer
@@ -298,7 +295,7 @@ type FetcherConfig struct {
 
 type TimeFunc func() time.Time
 
-//BlockFetcher can be used to fetch blocks from orderers in a byzantine fault tolerant way.
+// BlockFetcher can be used to fetch blocks from orderers in a byzantine fault tolerant way.
 type BlockFetcher struct {
 	MaxPullBlockRetries      uint64
 	AttestationSourceFactory func(c FetcherConfig) AttestationSource
@@ -318,19 +315,22 @@ type BlockFetcher struct {
 }
 
 func (bf *BlockFetcher) getBlockSource(op BlockSourceOps) BlockSource {
-
 	switch op {
 	case CURRENTSOURCE:
 		// set the first source or shuffle the current source
 		emptyEC := EndpointCriteria{}
 		if bf.isShuffleTime() || bf.currentEndpoint.Endpoint == emptyEC.Endpoint {
+			bf.Logger.Debugf("CURRENTSOURCE: Shuffle Endpoint")
 			bf.shuffleEndpoint()
 		}
 	case SHUFFLESOURCE:
+		bf.Logger.Debugf("SHUFFLESOURCE: Shuffle Endpoint")
 		bf.shuffleEndpoint()
 	case SUSPECTSOURCE:
 		blockwitheld, err := bf.isBlockWitheld(bf.currentSeq)
 		if blockwitheld || err != nil {
+			bf.Logger.Debugf("SUSPECTSOURCE: blockwitheld: %v, err: %v", blockwitheld, err)
+			bf.Logger.Debugf("SUSPECTSOURCE: Shuffle Endpoint")
 			bf.shuffleEndpoint()
 		}
 	}
@@ -339,7 +339,6 @@ func (bf *BlockFetcher) getBlockSource(op BlockSourceOps) BlockSource {
 }
 
 func (bf *BlockFetcher) setBlockSource(ec EndpointCriteria) {
-
 	bf.Logger.Debugf("Set [%s] as block source", ec.Endpoint)
 	// close old blocksource
 	if bf.currentBlockSource != nil {
@@ -385,8 +384,8 @@ func (bf *BlockFetcher) isShuffleTime() bool {
 	return shuffle
 }
 
-//isEndpointByzantine connects to BlockFetcher.MaxByzantineNodes orderer nodes and pulls attestation blocks from them
-//to suspect the byzantine behaiour of orderer nodes.
+// isEndpointByzantine connects to BlockFetcher.MaxByzantineNodes orderer nodes and pulls attestation blocks from them
+// to suspect the byzantine behaiour of orderer nodes.
 func (bf *BlockFetcher) isEndpointByzantine(ec EndpointCriteria, seq uint64) (bool, error) {
 	bf.Logger.Infof("Checking for BFT Behavior of [%s]", ec.Endpoint)
 
@@ -408,7 +407,6 @@ func (bf *BlockFetcher) isEndpointByzantine(ec EndpointCriteria, seq uint64) (bo
 
 	wg.Add(int(bf.MaxByzantineNodes))
 	for i := 0; i < int(bf.MaxByzantineNodes); i++ {
-
 		// goroutine to pull attestations and put then in attestationsC channel
 		go func(c chan *orderer.BlockAttestation) {
 			defer wg.Done()
@@ -426,6 +424,7 @@ func (bf *BlockFetcher) isEndpointByzantine(ec EndpointCriteria, seq uint64) (bo
 				config.Endpoints = group.select_random_entries(1)
 
 				if attestation_puller != nil {
+					bf.Logger.Errorf("Close previous attestation puller")
 					attestation_puller.Close()
 				}
 				bf.Logger.Debugf("Create attestation source [%s]", config.Endpoints[0].Endpoint)
@@ -471,18 +470,14 @@ func (bf *BlockFetcher) isBlockWitheld(seq uint64) (bool, error) {
 		return false, err
 	}
 	if malicious {
-		bf.Logger.Debugf("byzantine malicious behavior suspected for [%s]", bf.currentEndpoint.Endpoint)
+		bf.Logger.Debugf("Byzantine malicious behavior suspected for [%s]", bf.currentEndpoint.Endpoint)
 		bf.suspects.insert(bf.currentEndpoint.Endpoint)
 		return true, nil
 	}
 	return false, nil
 }
 
-func (bf *BlockFetcher) isEndpointSuspected() bool {
-	return bf.suspects.has(bf.currentEndpoint.Endpoint)
-}
-
-//PullBlock pulls blocks from orderers in a BFT way.
+// PullBlock pulls blocks from orderers in a BFT way.
 func (bf *BlockFetcher) PullBlock(seq uint64) *common.Block {
 	retriesLeft := bf.MaxPullBlockRetries
 
