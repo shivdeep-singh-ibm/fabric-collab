@@ -278,6 +278,15 @@ func Main() {
 		conf.General.Authentication.NoExpirationChecks,
 	)
 
+	attestationService := NewAttestationService(
+		manager,
+		metricsProvider,
+		&conf.Debug,
+		conf.General.Authentication.TimeWindow,
+		mutualTLS,
+		conf.General.Authentication.NoExpirationChecks,
+	)
+
 	logger.Infof("Starting %s", metadata.GetVersionInfo())
 	handleSignals(addPlatformSignals(map[os.Signal]func(){
 		syscall.SIGTERM: func() {
@@ -297,6 +306,7 @@ func Main() {
 		go initializeProfilingService(conf)
 	}
 	ab.RegisterAtomicBroadcastServer(grpcServer.Server(), server)
+	ab.RegisterBlockAttestationsServer(grpcServer.Server(), attestationService)
 	logger.Info("Beginning to serve requests")
 	if err := grpcServer.Start(); err != nil {
 		logger.Fatalf("Atomic Broadcast gRPC server has terminated while serving requests due to: %v", err)
