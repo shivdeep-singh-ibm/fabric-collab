@@ -191,7 +191,6 @@ func handleChainCluster(support consensus.ConsenterSupport, metadata *cb.Metadat
 }
 
 func Test_attestationserver_BlockAttestations(t *testing.T) {
-
 	ts := util.CreateUtcTimestamp()
 	channelHeader := &cb.ChannelHeader{
 		ChannelId: "mychannel",
@@ -255,11 +254,11 @@ func Test_attestationserver_BlockAttestations(t *testing.T) {
 		err = asr.BlockAttestations(envelope, mockstream)
 		require.NoError(t, err)
 
-		BlockResponse, err := mockstream.RecvResponse()
+		BlockResponse, _ := mockstream.RecvResponse()
 		blockattestation := BlockResponse.GetBlockAttestation()
 		require.NotNil(t, blockattestation)
 
-		StatusResponse, err := mockstream.RecvResponse()
+		StatusResponse, _ := mockstream.RecvResponse()
 		require.Equal(t, cb.Status_SUCCESS, StatusResponse.GetStatus())
 	})
 
@@ -268,7 +267,7 @@ func Test_attestationserver_BlockAttestations(t *testing.T) {
 		asr := NewAttestationService(&multichannel.Registrar{}, &disabled.Provider{}, nil, time.Second, false, false)
 		err := asr.BlockAttestations(&cb.Envelope{}, mockstream)
 		require.NoError(t, err)
-		StatusResponse, err := mockstream.RecvResponse()
+		StatusResponse, _ := mockstream.RecvResponse()
 		require.Equal(t, cb.Status_BAD_REQUEST, StatusResponse.GetStatus())
 	})
 
@@ -277,7 +276,7 @@ func Test_attestationserver_BlockAttestations(t *testing.T) {
 		asr := NewAttestationService(&multichannel.Registrar{}, &disabled.Provider{}, nil, time.Second, false, false)
 		err := asr.BlockAttestations(envelope, mockstream)
 		require.NoError(t, err)
-		StatusResponse, err := mockstream.RecvResponse()
+		StatusResponse, _ := mockstream.RecvResponse()
 		require.Equal(t, cb.Status_NOT_FOUND, StatusResponse.GetStatus())
 	})
 }

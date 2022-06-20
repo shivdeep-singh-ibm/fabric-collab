@@ -46,12 +46,12 @@
 #   - unit-test - runs the go-test based unit tests
 #   - verify - runs unit tests for only the changed package tree
 
-ALPINE_VER ?= 3.14
+ALPINE_VER ?= 3.16
 BASE_VERSION = 2.5.0
 
 # 3rd party image version
 # These versions are also set in the runners in ./integration/runners/
-COUCHDB_VER ?= 3.1.1
+COUCHDB_VER ?= 3.2.2
 KAFKA_VER ?= 5.3.1
 ZOOKEEPER_VER ?= 5.3.1
 
@@ -78,7 +78,7 @@ METADATA_VAR += CommitSHA=$(EXTRA_VERSION)
 METADATA_VAR += BaseDockerLabel=$(BASE_DOCKER_LABEL)
 METADATA_VAR += DockerNamespace=$(DOCKER_NS)
 
-GO_VER = 1.17.5
+GO_VER = 1.18.2
 GO_TAGS ?=
 
 RELEASE_EXES = orderer $(TOOLS_EXES)
@@ -226,7 +226,7 @@ $(BUILD_DIR)/bin/%: GO_LDFLAGS = $(METADATA_VAR:%=-X $(PKGNAME)/common/metadata.
 $(BUILD_DIR)/bin/%:
 	@echo "Building $@"
 	@mkdir -p $(@D)
-	GOBIN=$(abspath $(@D)) go install -tags "$(GO_TAGS)" -ldflags "$(GO_LDFLAGS)" $(pkgmap.$(@F))
+	GOBIN=$(abspath $(@D)) go install -tags "$(GO_TAGS)" -ldflags "$(GO_LDFLAGS)" -buildvcs=false $(pkgmap.$(@F))
 	@touch $@
 
 .PHONY: docker
@@ -274,7 +274,7 @@ $(foreach platform, $(RELEASE_PLATFORMS), $(RELEASE_EXES:%=release/$(platform)/b
 	$(eval GOARCH = $(word 2,$(subst -, ,$(platform))))
 	@echo "Building $@ for $(GOOS)-$(GOARCH)"
 	mkdir -p $(@D)
-	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $@ -tags "$(GO_TAGS)" -ldflags "$(GO_LDFLAGS)" $(pkgmap.$(@F))
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $@ -tags "$(GO_TAGS)" -ldflags "$(GO_LDFLAGS)" -buildvcs=false $(pkgmap.$(@F))
 
 .PHONY: dist
 dist: dist-clean dist/$(MARCH)
@@ -352,6 +352,6 @@ ccaasbuilder-clean:
 
 .PHONY: ccaasbuilder
 ccaasbuilder: ccaasbuilder-clean
-	cd ccaas_builder && go test -v ./cmd/detect && go build -o ../$(MARCH:%=release/%)/bin/ccaas_builder/bin/ ./cmd/detect/
-	cd ccaas_builder && go test -v ./cmd/build && go build -o ../$(MARCH:%=release/%)/bin/ccaas_builder/bin/ ./cmd/build/
-	cd ccaas_builder && go test -v ./cmd/release && go build -o ../$(MARCH:%=release/%)/bin/ccaas_builder/bin/ ./cmd/release/
+	cd ccaas_builder && go test -v ./cmd/detect && go build -o ../$(MARCH:%=release/%)/bin/ccaas_builder/bin/ -buildvcs=false ./cmd/detect/
+	cd ccaas_builder && go test -v ./cmd/build && go build -o ../$(MARCH:%=release/%)/bin/ccaas_builder/bin/ -buildvcs=false ./cmd/build/
+	cd ccaas_builder && go test -v ./cmd/release && go build -o ../$(MARCH:%=release/%)/bin/ccaas_builder/bin/ -buildvcs=false ./cmd/release/

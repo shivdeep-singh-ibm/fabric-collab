@@ -28,12 +28,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type endorserResponse struct {
-	action         *peer.ChaincodeEndorsedAction
-	err            *gp.ErrorDetail
-	timeoutExpired bool
-}
-
 // Evaluate will invoke the transaction function as specified in the SignedProposal
 func (gs *Server) Evaluate(ctx context.Context, request *gp.EvaluateRequest) (*gp.EvaluateResponse, error) {
 	if request == nil {
@@ -340,9 +334,16 @@ func (gs *Server) planFromFirstEndorser(ctx context.Context, channel string, cha
 
 	// 4. If transient data is involved, then we need to ensure that discovery only returns orgs which own the collections involved.
 	// Do this by setting NoPrivateReads to false on each collection
+	originalInterest := &peer.ChaincodeInterest{}
+	var protectedCollections []string
 	if hasTransientData {
 		for _, call := range interest.GetChaincodes() {
-			call.NoPrivateReads = false
+			ccc := *call // shallow copy
+			originalInterest.Chaincodes = append(originalInterest.Chaincodes, &ccc)
+			if call.NoPrivateReads {
+				call.NoPrivateReads = false
+				protectedCollections = append(protectedCollections, call.CollectionNames...)
+			}
 		}
 	}
 
@@ -350,6 +351,13 @@ func (gs *Server) planFromFirstEndorser(ctx context.Context, channel string, cha
 	// The preferred discovery layout will contain the firstEndorser's Org.
 	plan, err = gs.registry.endorsementPlan(channel, interest, firstEndorser)
 	if err != nil {
+		if len(protectedCollections) > 0 {
+			// may have failed because of the cautious approach we are taking with transient data - check
+			_, err = gs.registry.endorsementPlan(channel, originalInterest, firstEndorser)
+			if err == nil {
+				return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("requires endorsement from organisation(s) that are not in the distribution policy of the private data collection(s): %v; retry specifying trusted endorsing organizations to protect transient data", protectedCollections))
+			}
+		}
 		return nil, status.Error(codes.FailedPrecondition, err.Error())
 	}
 
