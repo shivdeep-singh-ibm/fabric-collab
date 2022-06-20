@@ -35,6 +35,7 @@ const (
 
 type BlockSource interface {
 	PullBlock(seq uint64) *common.Block
+	HeightsByEndpoints() (map[string]uint64, error)
 	UpdateEndpoints(endpoints []EndpointCriteria)
 	Close()
 }
@@ -516,4 +517,36 @@ func (bf *BlockFetcher) PullBlock(seq uint64) *common.Block {
 
 		retriesLeft--
 	}
+}
+
+// HeightsByEndpoints returns the block heights by endpoints of orderers
+func (bf BlockFetcher) HeightsByEndpoints() (map[string]uint64, error) {
+	return bf.BlockSourceFactory(bf.Config).HeightsByEndpoints()
+}
+
+// UpdateEndpoints assigns the new endpoints.
+func (p *BlockFetcher) UpdateEndpoints(endpoints []EndpointCriteria) {
+	p.Logger.Debugf("Updating endpoints: %v", endpoints)
+	p.Config.Endpoints = endpoints
+}
+
+// Close closes the blocksource of blockfetcher.
+func (bf BlockFetcher) Close() {
+	if bf.currentBlockSource != nil {
+		bf.currentBlockSource.Close()
+	}
+}
+
+// Clone returns a copy of this BlockFetcher initialized
+// for the given channel
+func (p *BlockFetcher) Clone() *BlockFetcher {
+	// Clone by value
+	copy := *p
+
+	// Reset internal state
+	copy.currentEndpoint = EndpointCriteria{}
+	copy.currentSeq = 0
+	copy.currentBlockSource = nil
+	copy.suspects = suspectSet{}
+	return &copy
 }
