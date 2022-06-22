@@ -14,7 +14,6 @@ import (
 
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/orderer"
-	ab "github.com/hyperledger/fabric-protos-go/orderer"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/internal/pkg/identity"
@@ -83,6 +82,7 @@ func (s suspectSet) has(entry string) bool {
 type groupCollection struct {
 	entries []EndpointCriteria
 	cursor  int
+	lock    sync.Mutex
 }
 
 // select_random_entries returns n entries from groupCollection
@@ -90,6 +90,9 @@ func (g *groupCollection) select_random_entries(n int) []EndpointCriteria {
 	// it uses the cursor index to select the entries, to ensure that entries are unique
 	// and not repeating
 	nbr := []EndpointCriteria{}
+
+	g.lock.Lock()
+	defer g.lock.Unlock()
 
 	for i := 0; i < n; i++ {
 		// select the next entry, circularly looping over the array
@@ -108,6 +111,7 @@ type AttestationPuller struct {
 	openConnections []attestationConnectionInfo
 	cancelStream    func()
 	Logger          *flogging.FabricLogger
+	lock            sync.Mutex
 }
 
 func (p *AttestationPuller) seekNextEnvelope(startSeq uint64) (*common.Envelope, error) {
@@ -123,6 +127,8 @@ func (p *AttestationPuller) seekNextEnvelope(startSeq uint64) (*common.Envelope,
 }
 
 func (p *AttestationPuller) closeEndpoints() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	// Close the streams and grpc connections
 	for _, oc := range p.openConnections {
 		oc.stream.cancelFunc()
@@ -156,7 +162,9 @@ func (p *AttestationPuller) pullAttestationBlock(ec EndpointCriteria, env *commo
 	// append the stream to bf.openConnections, so that Close can close all streams
 	// dial connections
 	cni := attestationConnectionInfo{stream: stream, conn: conn}
+	p.lock.Lock()
 	p.openConnections = append(p.openConnections, cni)
+	p.lock.Unlock()
 	p.Logger.Debugf("Add grpc conn to openConnections list.")
 	resp, err := stream.Recv()
 	if err != nil {
@@ -212,7 +220,7 @@ func (stream *impatientAttestationStream) abort() {
 
 // Recv blocks until a response is received from the stream or the
 // timeout expires.
-func (stream *impatientAttestationStream) Recv() (*ab.BlockAttestationResponse, error) {
+func (stream *impatientAttestationStream) Recv() (*orderer.BlockAttestationResponse, error) {
 	// Initialize a timeout to cancel the stream when it expires
 	timeout := time.NewTimer(stream.waitTimeout)
 	defer timeout.Stop()

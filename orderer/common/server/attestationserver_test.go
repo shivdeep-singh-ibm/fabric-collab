@@ -16,6 +16,7 @@ import (
 	cb "github.com/hyperledger/fabric-protos-go/common"
 	ab "github.com/hyperledger/fabric-protos-go/orderer"
 	"github.com/hyperledger/fabric/bccsp/sw"
+	"github.com/hyperledger/fabric/common/deliver"
 	"github.com/hyperledger/fabric/common/ledger/blockledger"
 	"github.com/hyperledger/fabric/common/ledger/blockledger/fileledger"
 	"github.com/hyperledger/fabric/common/metrics/disabled"
@@ -250,7 +251,8 @@ func Test_attestationserver_BlockAttestations(t *testing.T) {
 
 		mockstream := NewAttestationServerStream()
 
-		asr := NewAttestationService(manager, &disabled.Provider{}, nil, time.Second, false, false)
+		metrics := deliver.NewMetrics(&disabled.Provider{})
+		asr := NewAttestationService(manager, metrics, nil, time.Second, false, false)
 		err = asr.BlockAttestations(envelope, mockstream)
 		require.NoError(t, err)
 
@@ -264,7 +266,8 @@ func Test_attestationserver_BlockAttestations(t *testing.T) {
 
 	t.Run("Block attestation returns with BAD_REQUEST when envelope is malformed", func(t *testing.T) {
 		mockstream := NewAttestationServerStream()
-		asr := NewAttestationService(&multichannel.Registrar{}, &disabled.Provider{}, nil, time.Second, false, false)
+		metrics := deliver.NewMetrics(&disabled.Provider{})
+		asr := NewAttestationService(&multichannel.Registrar{}, metrics, nil, time.Second, false, false)
 		err := asr.BlockAttestations(&cb.Envelope{}, mockstream)
 		require.NoError(t, err)
 		StatusResponse, _ := mockstream.RecvResponse()
@@ -273,7 +276,8 @@ func Test_attestationserver_BlockAttestations(t *testing.T) {
 
 	t.Run("Block attestion returns with NOTFOUND when custom policy check fails", func(t *testing.T) {
 		mockstream := NewAttestationServerStream()
-		asr := NewAttestationService(&multichannel.Registrar{}, &disabled.Provider{}, nil, time.Second, false, false)
+		metrics := deliver.NewMetrics(&disabled.Provider{})
+		asr := NewAttestationService(&multichannel.Registrar{}, metrics, nil, time.Second, false, false)
 		err := asr.BlockAttestations(envelope, mockstream)
 		require.NoError(t, err)
 		StatusResponse, _ := mockstream.RecvResponse()

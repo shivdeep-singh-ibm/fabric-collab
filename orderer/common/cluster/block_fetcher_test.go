@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -245,7 +246,10 @@ func TestBlockFetcherBFTBehaviorBlockWithhold(t *testing.T) {
 	}
 
 	attestation_source_created := false
+	lock := sync.Mutex{}
 	bf.AttestationSourceFactory = func(c cluster.FetcherConfig) cluster.AttestationSource {
+		lock.Lock()
+		defer lock.Unlock()
 		if !attestation_source_created {
 			// first attestation source created withholds attestation
 			attestation_source_created = true
@@ -453,7 +457,10 @@ func TestBlockFetcherBFTBehaviorPullAttestationError(t *testing.T) {
 	}
 
 	attestation_source_created := false
+	lock := sync.Mutex{}
 	bf.AttestationSourceFactory = func(c cluster.FetcherConfig) cluster.AttestationSource {
+		lock.Lock()
+		defer lock.Unlock()
 		if !attestation_source_created {
 			// first attestation source created returns error
 			attestation_source_created = true
@@ -535,7 +542,10 @@ func TestBlockFetcherBFTBehaviorAttestationsLessThanF(t *testing.T) {
 	}
 
 	attestation_source_created := false
+	lock := sync.Mutex{}
 	bf.AttestationSourceFactory = func(c cluster.FetcherConfig) cluster.AttestationSource {
+		lock.Lock()
+		defer lock.Unlock()
 		if !attestation_source_created {
 			// first attestation source created returnsattestation block
 			attestation_source_created = true
