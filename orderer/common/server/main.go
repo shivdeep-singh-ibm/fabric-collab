@@ -28,6 +28,7 @@ import (
 	"github.com/hyperledger/fabric/bccsp/factory"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/crypto"
+	"github.com/hyperledger/fabric/common/deliver"
 	"github.com/hyperledger/fabric/common/fabhttp"
 	"github.com/hyperledger/fabric/common/flogging"
 	floggingmetrics "github.com/hyperledger/fabric/common/flogging/metrics"
@@ -41,6 +42,7 @@ import (
 	"github.com/hyperledger/fabric/internal/pkg/identity"
 	"github.com/hyperledger/fabric/msp"
 	"github.com/hyperledger/fabric/orderer/common/bootstrap/file"
+	"github.com/hyperledger/fabric/orderer/common/broadcast"
 	"github.com/hyperledger/fabric/orderer/common/channelparticipation"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
@@ -269,9 +271,12 @@ func Main() {
 	defer adminServer.Stop()
 
 	mutualTLS := serverConfig.SecOpts.UseTLS && serverConfig.SecOpts.RequireClientCert
+	deliverMetrics := deliver.NewMetrics(metricsProvider)
+	broadcastMetrics := broadcast.NewMetrics(metricsProvider)
 	server := NewServer(
 		manager,
-		metricsProvider,
+		deliverMetrics,
+		broadcastMetrics,
 		&conf.Debug,
 		conf.General.Authentication.TimeWindow,
 		mutualTLS,
@@ -280,7 +285,7 @@ func Main() {
 
 	attestationService := NewAttestationService(
 		manager,
-		metricsProvider,
+		deliverMetrics,
 		&conf.Debug,
 		conf.General.Authentication.TimeWindow,
 		mutualTLS,

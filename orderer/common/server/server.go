@@ -17,7 +17,6 @@ import (
 	cb "github.com/hyperledger/fabric-protos-go/common"
 	ab "github.com/hyperledger/fabric-protos-go/orderer"
 	"github.com/hyperledger/fabric/common/deliver"
-	"github.com/hyperledger/fabric/common/metrics"
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/orderer/common/broadcast"
 	localconfig "github.com/hyperledger/fabric/orderer/common/localconfig"
@@ -85,17 +84,18 @@ func (rs *responseSender) DataType() string {
 // NewServer creates an ab.AtomicBroadcastServer based on the broadcast target and ledger Reader
 func NewServer(
 	r *multichannel.Registrar,
-	metricsProvider metrics.Provider,
+	deliverMetrics *deliver.Metrics,
+	broadcastMetrics *broadcast.Metrics,
 	debug *localconfig.Debug,
 	timeWindow time.Duration,
 	mutualTLS bool,
 	expirationCheckDisabled bool,
 ) ab.AtomicBroadcastServer {
 	s := &server{
-		dh: deliver.NewHandler(deliverSupport{Registrar: r}, timeWindow, mutualTLS, deliver.NewMetrics(metricsProvider), expirationCheckDisabled),
+		dh: deliver.NewHandler(deliverSupport{Registrar: r}, timeWindow, mutualTLS, deliverMetrics, expirationCheckDisabled),
 		bh: &broadcast.Handler{
 			SupportRegistrar: broadcastSupport{Registrar: r},
-			Metrics:          broadcast.NewMetrics(metricsProvider),
+			Metrics:          broadcastMetrics,
 		},
 		debug:     debug,
 		Registrar: r,

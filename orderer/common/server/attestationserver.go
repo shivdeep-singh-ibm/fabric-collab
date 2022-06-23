@@ -13,7 +13,6 @@ import (
 	cb "github.com/hyperledger/fabric-protos-go/common"
 	ab "github.com/hyperledger/fabric-protos-go/orderer"
 	"github.com/hyperledger/fabric/common/deliver"
-	"github.com/hyperledger/fabric/common/metrics"
 	"github.com/hyperledger/fabric/common/policies"
 	localconfig "github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/orderer/common/msgprocessor"
@@ -31,14 +30,14 @@ type attestationserver struct {
 // NewServer creates an ab.AtomicBroadcastServer based on the broadcast target and ledger Reader
 func NewAttestationService(
 	r *multichannel.Registrar,
-	metricsProvider metrics.Provider,
+	metrics *deliver.Metrics,
 	debug *localconfig.Debug,
 	timeWindow time.Duration,
 	mutualTLS bool,
 	expirationCheckDisabled bool,
 ) ab.BlockAttestationsServer {
 	s := &attestationserver{
-		dh:        deliver.NewHandler(deliverSupport{Registrar: r}, timeWindow, mutualTLS, deliver.NewMetrics(metricsProvider), expirationCheckDisabled),
+		dh:        deliver.NewHandler(deliverSupport{Registrar: r}, timeWindow, mutualTLS, metrics, expirationCheckDisabled),
 		debug:     debug,
 		Registrar: r,
 	}
