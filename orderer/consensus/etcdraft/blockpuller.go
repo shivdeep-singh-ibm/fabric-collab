@@ -194,11 +194,21 @@ func NewBlockFetcher(support consensus.ConsenterSupport,
 		ShuffleTimeout:    shuffleTimeout,
 		LastShuffledAt:    time.Now(),
 		MaxByzantineNodes: maxByzantineNodes,
-		ConfirmByzantineBehavior: func(attestations []*orderer.BlockAttestation) bool {
+		ConfirmByzantineBehavior: func(seq uint64, attestations []*orderer.BlockAttestation) bool {
 			if attestations == nil {
 				return true
 			}
 			isAttestationForged := func(a *orderer.BlockAttestation) bool {
+				// check for block number
+				if a.Header != nil {
+					if a.Header.Number != seq {
+						// attestation number doesn't match
+						return true
+					}
+				} else {
+					// header should not be nil for a valid attestation
+					return true
+				}
 				err := verifyBlockSequence([]*common.Block{{Header: a.Header, Metadata: a.Metadata}}, support.ChannelID())
 				return err != nil
 			}

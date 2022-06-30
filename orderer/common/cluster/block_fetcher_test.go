@@ -272,7 +272,7 @@ func TestBlockFetcherBFTBehaviorBlockWithhold(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.ConfirmByzantineBehavior = func(seq uint64, b []*orderer.BlockAttestation) bool {
 		// simulate byzantine behaviour
 		return true
 	}
@@ -342,7 +342,7 @@ func TestBlockFetcherBFTBehaviorSuspicionNoBlockWithhold(t *testing.T) {
 
 	// No byzantine behaviour should make sure that the
 	// endpoint is not shuffled.
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.ConfirmByzantineBehavior = func(seq uint64, b []*orderer.BlockAttestation) bool {
 		return false
 	}
 
@@ -416,7 +416,7 @@ func TestBlockFetcherBFTBehaviorSuspicionListFull(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.ConfirmByzantineBehavior = func(seq uint64, b []*orderer.BlockAttestation) bool {
 		// simulate byzantine behaviour
 		return true
 	}
@@ -502,7 +502,7 @@ func TestBlockFetcherBFTBehaviorPullAttestationError(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.ConfirmByzantineBehavior = func(seq uint64, b []*orderer.BlockAttestation) bool {
 		// simulate byzantine behaviour
 		return true
 	}
@@ -578,7 +578,7 @@ func TestBlockFetcherBFTBehaviorAttestationsLessThanF(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.ConfirmByzantineBehavior = func(seq uint64, b []*orderer.BlockAttestation) bool {
 		// simulate byzantine behaviour
 		return true
 	}
@@ -689,7 +689,7 @@ func TestBlockFetcherMaxRetriesExhausted(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.ConfirmByzantineBehavior = func(seq uint64, b []*orderer.BlockAttestation) bool {
 		// for all cases
 		return false
 	}

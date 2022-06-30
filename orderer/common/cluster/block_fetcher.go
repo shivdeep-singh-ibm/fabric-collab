@@ -318,7 +318,7 @@ type BlockFetcher struct {
 	ShuffleTimeout           time.Duration
 	LastShuffledAt           time.Time
 	MaxByzantineNodes        uint64
-	ConfirmByzantineBehavior func(attestations []*orderer.BlockAttestation) bool
+	ConfirmByzantineBehavior func(seq uint64, attestations []*orderer.BlockAttestation) bool
 	ShuffleTimeoutThrehold   int64 // expressed as %age of FetchTimeOut
 	TimeNow                  TimeFunc
 }
@@ -467,7 +467,7 @@ func (bf *BlockFetcher) isEndpointByzantine(ec EndpointCriteria, seq uint64) (bo
 		bf.Logger.Errorf("[%d] attestations pulled from [%d] nodes", len(attestations), bf.MaxByzantineNodes)
 		return true, errors.Errorf("some nodes did not send attestations")
 	}
-	return bf.ConfirmByzantineBehavior(attestations), nil
+	return bf.ConfirmByzantineBehavior(seq, attestations), nil
 }
 
 func (bf *BlockFetcher) isBlockWitheld(seq uint64) (bool, error) {
