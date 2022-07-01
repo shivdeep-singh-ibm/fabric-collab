@@ -59,6 +59,7 @@ type ChannelProtos struct {
 	HashingAlgorithm          *cb.HashingAlgorithm
 	BlockDataHashingStructure *cb.BlockDataHashingStructure
 	OrdererAddresses          *cb.OrdererAddresses
+	Orderers                  *cb.Orderers
 	Consortium                *cb.Consortium
 	Capabilities              *cb.Capabilities
 }
@@ -151,6 +152,11 @@ func (cc *ChannelConfig) BlockDataHashingStructureWidth() uint32 {
 // OrdererAddresses returns the list of valid orderer addresses to connect to to invoke Broadcast/Deliver
 func (cc *ChannelConfig) OrdererAddresses() []string {
 	return cc.protos.OrdererAddresses.Addresses
+}
+
+// Orderers returns the list of consenters
+func (cc *ChannelConfig) Orderers() []*cb.Consenter {
+	return cc.protos.Orderers.ConsenterMapping
 }
 
 // ConsortiumName returns the name of the consortium this channel was created under
