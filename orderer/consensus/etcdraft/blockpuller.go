@@ -175,7 +175,8 @@ func NewBlockFetcher(support consensus.ConsenterSupport,
 			}
 		},
 		BlockSourceFactory: func(c cluster.FetcherConfig) cluster.BlockSource {
-			return &cluster.BlockPuller{VerifyBlockSequence: verifyBlockSequence,
+			return &cluster.BlockPuller{
+				VerifyBlockSequence: verifyBlockSequence,
 				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID()),
 				RetryTimeout:        clusterConfig.ReplicationRetryTimeout,
 				MaxTotalBufferBytes: clusterConfig.ReplicationBufferSize,
