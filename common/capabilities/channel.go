@@ -67,7 +67,7 @@ func (cp *ChannelProvider) HasCapability(capability string) bool {
 	switch capability {
 	// Add new capability names here
 	case ChannelV3_0:
-		return false // Will be enabled in future v3.x binaries
+		return true
 	case ChannelV2_0:
 		return true
 	case ChannelV1_4_3:
