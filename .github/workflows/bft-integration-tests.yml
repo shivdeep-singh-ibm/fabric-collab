@@ -1,32 +1,28 @@
-# This is a basic workflow to help you get started with Actions
+# This is a workflow to run integration-tests for raft
 
 name: bft-integration-tests
 
 # Controls when the action will run.
 on:
-  # Triggers the workflow on push or pull request events but only for the release-1.4-BFT-3 branch
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   bft-integration-tests:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v2
 
+      # Sets up a golang dev env
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
           go-version: 1.18
 
+      # Installs ginkgo and gomega
       - name: Install Pre-reqs
         run: go install -mod=mod github.com/onsi/ginkgo/ginkgo@v1.11.0 && go get github.com/onsi/gomega/...
 
@@ -38,5 +34,4 @@ jobs:
           make docker
           docker pull couchdb:3.2.2
       - name: Integration Tests
-        #run: bash ./scripts/run-integration-tests.sh integration/raft
         run: ginkgo -v ./integration/raft/...
