@@ -148,26 +148,28 @@ func NewBlockFetcher(support consensus.ConsenterSupport,
 			string(stdDialer.Config.SecOpts.Certificate))
 	}
 
-	fc := cluster.FetcherConfig{
-		Channel:      support.ChannelID(),
-		Signer:       support,
-		TLSCert:      der.Bytes,
-		Dialer:       stdDialer,
-		Endpoints:    endpoints,
-		FetchTimeout: clusterConfig.ReplicationPullTimeout,
-	}
-
+	// TODO: change this to use the new mapping of consenters in the channel config
 	// To tolerate byzantine behaviour of `f` faulty nodes, we need a total of `3f + 1` nodes.
 	// f = maxByzantineNodes, total = len(endpoints)
 	maxByzantineNodes := uint64(len(endpoints)-1) / 3
 
 	// timeout for time based shuffling
-	// 10 times the fetchtimeout
 	shuffleTimeout := shuffleTimeoutMultiplier * clusterConfig.ReplicationPullTimeout
 	shuffleTimeoutThrehold := shuffleTimeoutPercentage
 
+	fc := cluster.FetcherConfig{
+		ShuffleTimeout:               shuffleTimeout,
+		CensorshipSuspicionThreshold: time.Minute,
+		MaxByzantineNodes:            maxByzantineNodes,
+		Channel:                      support.ChannelID(),
+		TLSCert:                      der.Bytes,
+		Endpoints:                    endpoints,
+		FetchTimeout:                 clusterConfig.ReplicationPullTimeout,
+	}
+
 	bf := cluster.BlockFetcher{
-		MaxPullBlockRetries: 0,
+		Signer: support,
+		Dialer: stdDialer,
 		AttestationSourceFactory: func(c cluster.FetcherConfig) cluster.AttestationSource {
 			return &cluster.AttestationPuller{
 				Config: fc,
@@ -189,12 +191,12 @@ func NewBlockFetcher(support consensus.ConsenterSupport,
 				StopChannel:         make(chan struct{}),
 			}
 		},
-		Config:            fc,
+		FetcherConfig:     fc,
 		Logger:            flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID()),
 		ShuffleTimeout:    shuffleTimeout,
 		LastShuffledAt:    time.Now(),
 		MaxByzantineNodes: maxByzantineNodes,
-		ConfirmByzantineBehavior: func(attestations []*orderer.BlockAttestation) bool {
+		VerifyAttestation: func(attestations []*orderer.BlockAttestation) bool {
 			if attestations == nil {
 				return true
 			}
@@ -215,8 +217,7 @@ func NewBlockFetcher(support consensus.ConsenterSupport,
 			}
 			return false
 		},
-		ShuffleTimeoutThrehold: shuffleTimeoutThrehold,
-		TimeNow:                time.Now,
+		TimeNow: time.Now,
 	}
 
 	return &LedgerBlockPuller{

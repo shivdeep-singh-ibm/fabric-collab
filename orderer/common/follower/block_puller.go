@@ -174,13 +174,13 @@ func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopC
 				StopChannel:         stopChannel,
 			}
 		},
-		Config:                 fc,
-		Logger:                 flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
-		ShuffleTimeout:         shuffleTimeout,
-		LastShuffledAt:         time.Now(),
-		MaxByzantineNodes:      maxByzantineNodes,
-		ShuffleTimeoutThrehold: shuffleTimeoutThrehold,
-		TimeNow:                time.Now,
+		Config:                       fc,
+		Logger:                       flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
+		ShuffleTimeout:               shuffleTimeout,
+		lastShuffledAt:               time.Now(),
+		MaxByzantineNodes:            maxByzantineNodes,
+		CensorshipSuspicionThreshold: shuffleTimeoutThrehold,
+		TimeNow:                      time.Now,
 	}
 
 	return bf, nil

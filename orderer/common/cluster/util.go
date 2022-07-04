@@ -29,6 +29,7 @@ import (
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/internal/pkg/comm"
+	mspconstants "github.com/hyperledger/fabric/msp"
 	"github.com/hyperledger/fabric/protoutil"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
@@ -461,6 +462,83 @@ func EndpointconfigFromConfigBlock(block *common.Block, bccsp bccsp.BCCSP) ([]En
 	}
 
 	return globalEndpointsFromConfig(aggregatedTLSCerts, bundle), nil
+}
+
+// EndpointconfigFromConfigBlockV3 retrieves TLS CA certificates and endpoints from a config block.
+// Unlike the EndpointconfigFromConfigBlockV function, it doesn't use a BCCSP and also doesn't honor global orderer addresses.
+func EndpointconfigFromConfigBlockV3(block *common.Block) ([]EndpointCriteria, error) {
+	if block == nil {
+		return nil, errors.New("nil block")
+	}
+
+	envelope, err := protoutil.ExtractEnvelope(block, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	// unmarshal the payload bytes
+	payload, err := protoutil.UnmarshalPayload(envelope.Payload)
+	if err != nil {
+		return nil, err
+	}
+
+	// unmarshal the config envelope bytes
+	configEnv := &common.ConfigEnvelope{}
+	if err := proto.Unmarshal(payload.Data, configEnv); err != nil {
+		return nil, err
+	}
+
+	if configEnv.Config == nil || configEnv.Config.ChannelGroup == nil || configEnv.Config.ChannelGroup.Groups == nil ||
+		configEnv.Config.ChannelGroup.Groups[channelconfig.OrdererGroupKey] == nil || configEnv.Config.ChannelGroup.Groups[channelconfig.OrdererGroupKey].Groups == nil {
+		return nil, errors.Errorf("invalid config, orderer groups is empty")
+	}
+
+	ordererGrp := configEnv.Config.ChannelGroup.Groups[channelconfig.OrdererGroupKey].Groups
+
+	return perOrgEndpointsByMSPID(ordererGrp)
+
+}
+
+// perOrgEndpointsByMSPID returns the per orderer org endpoints
+func perOrgEndpointsByMSPID(ordererGrp map[string]*common.ConfigGroup) ([]EndpointCriteria, error) {
+	var res []EndpointCriteria
+
+	for _, group := range ordererGrp {
+		mspConfig := &msp.MSPConfig{}
+		if err := proto.Unmarshal(group.Values[channelconfig.MSPKey].Value, mspConfig); err != nil {
+			return nil, errors.Wrap(err, "failed parsing MSPConfig")
+		}
+		// Skip non fabric MSPs, they cannot be orderers.
+		if mspConfig.Type != int32(mspconstants.FABRIC) {
+			continue
+		}
+
+		fabricConfig := &msp.FabricMSPConfig{}
+		if err := proto.Unmarshal(mspConfig.Config, fabricConfig); err != nil {
+			return nil, errors.Wrap(err, "failed marshaling FabricMSPConfig")
+		}
+
+		var rootCAs [][]byte
+
+		rootCAs = append(rootCAs, fabricConfig.TlsRootCerts...)
+		rootCAs = append(rootCAs, fabricConfig.TlsIntermediateCerts...)
+
+		if perOrgAddresses := group.Values[channelconfig.EndpointsKey]; perOrgAddresses != nil {
+			ordererEndpoints := &common.OrdererAddresses{}
+			if err := proto.Unmarshal(perOrgAddresses.Value, ordererEndpoints); err != nil {
+				return nil, errors.Wrap(err, "failed unmarshalling orderer addresses")
+			}
+
+			for _, endpoint := range ordererEndpoints.Addresses {
+				res = append(res, EndpointCriteria{
+					TLSRootCAs: rootCAs,
+					Endpoint:   endpoint,
+				})
+			}
+		}
+	}
+
+	return res, nil
 }
 
 func perOrgEndpoints(ordererConfig channelconfig.Orderer, mspIDsToCerts map[string][][]byte) []EndpointCriteria {

@@ -39,7 +39,7 @@ func TestBlockFetcherHappyPath(t *testing.T) {
 
 	// Inject Time Function
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	bf.ShuffleTimeout = time.Second * 1
 	bf.Logger = flogging.MustGetLogger("test")
 
@@ -79,7 +79,7 @@ func TestBlockFetcherShuffleTimeOut(t *testing.T) {
 
 	// Inject Time Function
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	bf.ShuffleTimeout = time.Duration(12 * time.Second)
 	bf.Logger = flogging.MustGetLogger("test")
 	bf.Config.Endpoints = []cluster.EndpointCriteria{{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5200"}}
@@ -118,7 +118,7 @@ func TestBlockFetcherShuffleTimeOutDisable(t *testing.T) {
 	}
 	// Inject Time Function
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	// Disable ShuffleTimeout
 	bf.ShuffleTimeout = time.Duration(0)
 	bf.Logger = flogging.MustGetLogger("test")
@@ -156,7 +156,7 @@ func TestBlockFetcherNodeOffline(t *testing.T) {
 	}
 
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	// Disable ShuffleTimeout
 	bf.ShuffleTimeout = time.Duration(0)
 	bf.Logger = flogging.MustGetLogger("test")
@@ -261,7 +261,7 @@ func TestBlockFetcherBFTBehaviorBlockWithhold(t *testing.T) {
 
 	// Add time
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	// Disable ShuffleTimeout
 	bf.MaxByzantineNodes = 3
 	bf.ShuffleTimeout = time.Duration(0)
@@ -272,7 +272,7 @@ func TestBlockFetcherBFTBehaviorBlockWithhold(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.VerifyAttestation = func(b []*orderer.BlockAttestation) bool {
 		// simulate byzantine behaviour
 		return true
 	}
@@ -318,11 +318,11 @@ func TestBlockFetcherBFTBehaviorSuspicionNoBlockWithhold(t *testing.T) {
 
 	// Add time
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	// Disable ShuffleTimeout
-	bf.MaxPullBlockRetries = 2
+	bf.MaxRetries = 2
 	bf.MaxByzantineNodes = 3
 	bf.ShuffleTimeout = time.Duration(0)
 	bf.Logger = flogging.MustGetLogger("test")
@@ -342,7 +342,7 @@ func TestBlockFetcherBFTBehaviorSuspicionNoBlockWithhold(t *testing.T) {
 
 	// No byzantine behaviour should make sure that the
 	// endpoint is not shuffled.
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.VerifyAttestation = func(b []*orderer.BlockAttestation) bool {
 		return false
 	}
 
@@ -405,7 +405,7 @@ func TestBlockFetcherBFTBehaviorSuspicionListFull(t *testing.T) {
 
 	// Add time
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	// Disable ShuffleTimeout
 	bf.MaxByzantineNodes = 1
 	bf.ShuffleTimeout = time.Duration(0)
@@ -416,7 +416,7 @@ func TestBlockFetcherBFTBehaviorSuspicionListFull(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.VerifyAttestation = func(b []*orderer.BlockAttestation) bool {
 		// simulate byzantine behaviour
 		return true
 	}
@@ -472,7 +472,7 @@ func TestBlockFetcherBFTBehaviorPullAttestationError(t *testing.T) {
 
 	// Add time
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	// Disable ShuffleTimeout
 	bf.MaxByzantineNodes = 3
 	bf.ShuffleTimeout = time.Duration(0)
@@ -502,7 +502,7 @@ func TestBlockFetcherBFTBehaviorPullAttestationError(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.VerifyAttestation = func(b []*orderer.BlockAttestation) bool {
 		// simulate byzantine behaviour
 		return true
 	}
@@ -557,7 +557,7 @@ func TestBlockFetcherBFTBehaviorAttestationsLessThanF(t *testing.T) {
 
 	// Add time
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	// Disable ShuffleTimeout
 	bf.MaxByzantineNodes = 3
 	bf.ShuffleTimeout = time.Duration(0)
@@ -578,7 +578,7 @@ func TestBlockFetcherBFTBehaviorAttestationsLessThanF(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.VerifyAttestation = func(b []*orderer.BlockAttestation) bool {
 		// simulate byzantine behaviour
 		return true
 	}
@@ -677,9 +677,9 @@ func TestBlockFetcherMaxRetriesExhausted(t *testing.T) {
 
 	// Inject Time Function
 	bf.TimeNow = time.Now
-	bf.ShuffleTimeoutThrehold = 50
+	bf.CensorshipSuspicionThreshold = 50
 	// Disable ShuffleTimeout
-	bf.MaxPullBlockRetries = 2
+	bf.MaxRetries = 2
 	bf.MaxByzantineNodes = 3
 	bf.ShuffleTimeout = time.Duration(0)
 	bf.Logger = flogging.MustGetLogger("test")
@@ -689,7 +689,7 @@ func TestBlockFetcherMaxRetriesExhausted(t *testing.T) {
 		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
 	}
 
-	bf.ConfirmByzantineBehavior = func(b []*orderer.BlockAttestation) bool {
+	bf.VerifyAttestation = func(b []*orderer.BlockAttestation) bool {
 		// for all cases
 		return false
 	}
