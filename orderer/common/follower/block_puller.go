@@ -135,52 +135,60 @@ func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopC
 	}
 
 	fc := cluster.FetcherConfig{
-		Channel:      creator.channelID,
-		Signer:       creator.signer,
-		TLSCert:      creator.der.Bytes,
-		Dialer:       creator.stdDialer,
-		Endpoints:    endpoints,
-		FetchTimeout: creator.clusterConfig.ReplicationPullTimeout,
+		Channel:                      creator.channelID,
+		TLSCert:                      creator.der.Bytes,
+		Endpoints:                    endpoints,
+		FetchTimeout:                 creator.clusterConfig.ReplicationPullTimeout,
+		CensorshipSuspicionThreshold: time.Duration((int64(creator.clusterConfig.ReplicationPullTimeout) * shuffleTimeoutPercentage / 100)),
+		PeriodicalShuffleInterval:    shuffleTimeoutMultiplier * creator.clusterConfig.ReplicationPullTimeout,
+		MaxRetries:                   uint64(creator.clusterConfig.ReplicationMaxRetries),
+		MaxByzantineNodes:            (len(endpoints) - 1) / 3,
 	}
 
-	maxByzantineNodes := uint64(len(endpoints)-1) / 3
-
-	// timeout for time based shuffling
-	shuffleTimeout := shuffleTimeoutMultiplier * creator.clusterConfig.ReplicationPullTimeout
-	shuffleTimeoutThrehold := shuffleTimeoutPercentage
+	blockVerifierFunc := func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
+		return creator.VerifyBlockSequence([]*common.Block{
+			{
+				Header:   header,
+				Metadata: metadata,
+			},
+		}, creator.channelID)
+	}
 
 	bf := &cluster.BlockFetcher{
-		MaxPullBlockRetries: 0,
-		AttestationSourceFactory: func(c cluster.FetcherConfig) cluster.AttestationSource {
+		FetcherConfig:   fc,
+		LastConfigBlock: configBlock,
+		BlockVerifierFactory: func(block *common.Block) cluster.BlockVerifierFunc {
+			// block is a config block
+			return blockVerifierFunc
+		},
+		VerifyBlock: blockVerifierFunc,
+		AttestationSourceFactory: func(c cluster.FetcherConfig, latestConfigBlock *common.Block) cluster.AttestationSource {
 			return &cluster.AttestationPuller{
-				Config: fc,
 				Logger: flogging.MustGetLogger("orderer.common.cluster.attestationpuller").With("channel", creator.channelID),
+				Signer: creator.signer,
+				Dialer: creator.stdDialer,
+				Config: fc,
 			}
 		},
-		BlockSourceFactory: func(c cluster.FetcherConfig) cluster.BlockSource {
-			// fill blockpuller fields from config
+		BlockSourceFactory: func(c cluster.FetcherConfig, latestConfigBlock *common.Block) cluster.BlockSource {
 			return &cluster.BlockPuller{
-				VerifyBlockSequence: creator.VerifyBlockSequence,
-				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
-				RetryTimeout:        creator.clusterConfig.ReplicationRetryTimeout,
-				MaxTotalBufferBytes: creator.clusterConfig.ReplicationBufferSize,
 				MaxPullBlockRetries: uint64(creator.clusterConfig.ReplicationMaxRetries),
-				FetchTimeout:        creator.clusterConfig.ReplicationPullTimeout,
-				Endpoints:           c.Endpoints,
-				Signer:              c.Signer,
+				MaxTotalBufferBytes: creator.clusterConfig.ReplicationBufferSize,
+				Signer:              creator.signer,
 				TLSCert:             creator.der.Bytes,
-				Channel:             c.Channel,
-				Dialer:              c.Dialer,
+				Channel:             c.Channel, FetchTimeout: creator.clusterConfig.ReplicationPullTimeout,
+				RetryTimeout:        creator.clusterConfig.ReplicationRetryTimeout,
+				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
+				Dialer:              creator.stdDialer,
+				VerifyBlockSequence: creator.VerifyBlockSequence,
+				Endpoints:           c.Endpoints,
 				StopChannel:         stopChannel,
 			}
 		},
-		Config:                       fc,
-		Logger:                       flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
-		ShuffleTimeout:               shuffleTimeout,
-		lastShuffledAt:               time.Now(),
-		MaxByzantineNodes:            maxByzantineNodes,
-		CensorshipSuspicionThreshold: shuffleTimeoutThrehold,
-		TimeNow:                      time.Now,
+		Logger:  flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
+		TimeNow: time.Now,
+		Signer:  creator.signer,
+		Dialer:  creator.stdDialer,
 	}
 
 	return bf, nil

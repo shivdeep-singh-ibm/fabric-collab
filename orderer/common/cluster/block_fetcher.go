@@ -119,22 +119,25 @@ func (p *AttestationPuller) pullAttestationBlock(ec EndpointCriteria, env *commo
 	if err != nil {
 		p.Logger.Errorf("Failed to Dial [%s]: [%v]", ec.Endpoint, err)
 		return nil, err
+	} else {
+		defer conn.Close()
 	}
 
-	stream, err := newImpatientStream(conn, p.Config.FetchTimeout, env)
+	p.stream, err = newImpatientStream(conn, p.Config.FetchTimeout, env)
 	if err != nil {
 		p.Logger.Errorf("Failed to create stream: [%v]", err)
 		return nil, err
 	}
 
-	defer stream.cancel()
+	defer p.stream.cancel()
 
-	resp, err := stream.Recv()
+	resp, err := p.stream.Recv()
 	if err != nil {
 		p.Logger.Warningf("Received %v from %s: %v", resp, ec.Endpoint, err)
 		return nil, err
 	}
 
+	p.stream.CloseSend()
 	return extractAttestationFromResponse(resp)
 }
 
@@ -256,7 +259,6 @@ type FetcherConfig struct {
 	TLSCert                      []byte
 	Endpoints                    []EndpointCriteria
 	FetchTimeout                 time.Duration
-	ShuffleTimeout               time.Duration
 	CensorshipSuspicionThreshold time.Duration
 	PeriodicalShuffleInterval    time.Duration
 	MaxRetries                   uint64
@@ -277,7 +279,6 @@ type BlockFetcher struct {
 	AttestationSourceFactory func(fc FetcherConfig, latestConfigBlock *common.Block) AttestationSource
 	BlockSourceFactory       func(fc FetcherConfig, latestConfigBlock *common.Block) BlockSource
 	Logger                   *flogging.FabricLogger
-	VerifyAttestation        func(attestations *orderer.BlockAttestation) error
 	TimeNow                  TimeFunc
 	Signer                   identity.SignerSerializer
 	Dialer                   Dialer
@@ -292,7 +293,11 @@ type BlockFetcher struct {
 }
 
 func (bf *BlockFetcher) getBlockSource() BlockSource {
-	switch bf.blockSourceOp {
+	blockSourceOp := bf.blockSourceOp
+	// reset blocksource
+	bf.blockSourceOp = CurrentSource
+
+	switch blockSourceOp {
 	case CurrentSource:
 		return bf.currentBlockSource
 	case ShuffleSource:
@@ -314,8 +319,10 @@ func (bf *BlockFetcher) setBlockSource(ec EndpointCriteria) {
 	if bf.currentBlockSource != nil {
 		bf.currentBlockSource.Close()
 	}
-	bf.Endpoints = []EndpointCriteria{ec}
-	bf.currentBlockSource = bf.BlockSourceFactory(bf.FetcherConfig, bf.LastConfigBlock)
+	// bf.Endpoints = []EndpointCriteria{ec}
+	config := bf.FetcherConfig
+	config.Endpoints = []EndpointCriteria{ec}
+	bf.currentBlockSource = bf.BlockSourceFactory(config, bf.LastConfigBlock)
 }
 
 func (bf *BlockFetcher) maybeUpdateLatestConfigBlock(block *common.Block) {
@@ -335,12 +342,17 @@ func (bf *BlockFetcher) maybeUpdateLatestConfigBlock(block *common.Block) {
 			bf.Logger.Errorf("Failed parsing orderer endpoints from block %d: %v", block.Header.Number, err)
 			return
 		}
-		bf.updateEndpoints(endpoints)
+		bf.UpdateEndpoints(endpoints)
 	}
 }
 
 func (bf *BlockFetcher) shuffleEndpoint() {
 	candidates := bf.blockSourceCandidates()
+	// handle case when candidates list is empty
+	if len(candidates) == 0 {
+		bf.Logger.Info("Can't shuffle blockpuller endpoint. Not enough endpoints available")
+		return
+	}
 	bf.shuffleIndex++
 	effectiveIndex := bf.shuffleIndex % len(candidates)
 	bf.currentEndpoint = candidates[effectiveIndex]
@@ -392,8 +404,9 @@ func (bf *BlockFetcher) pullAndVerifyAttestations(seq uint64, candidates []Endpo
 			lock.Unlock()
 
 			attestation, err := attestationSource.PullAttestation(seq)
-			if err != nil {
+			if err != nil || attestation == nil {
 				lock.Lock()
+				bf.Logger.Debugf("Failed pulling block attestation for %d from %s: %v", seq, candidate.Endpoint, err)
 				if !foundAttestation {
 					bf.Logger.Warnf("Failed pulling block attestation for %d from %s: %v", seq, candidate.Endpoint, err)
 				}
@@ -417,12 +430,10 @@ func (bf *BlockFetcher) pullAndVerifyAttestations(seq uint64, candidates []Endpo
 			for _, source := range attestationSources {
 				source.Close()
 			}
-
 		}(candidates[i])
 	}
 
 	wg.Wait()
-
 	return foundAttestation
 }
 
@@ -432,7 +443,6 @@ func (bf *BlockFetcher) setup() {
 	}
 
 	bf.Logger.Infof("Setting up BlockFetcher: %+v, ", bf.FetcherConfig)
-
 	defer func() {
 		bf.setupExecuted = true
 	}()
@@ -456,14 +466,12 @@ func (bf *BlockFetcher) PullBlock(seq uint64) *common.Block {
 
 		startedPulling := bf.TimeNow()
 		timeSinceLastShuffle := startedPulling.Sub(bf.lastShuffledAt)
-
-		if bf.lastShuffledAt.Add(bf.PeriodicalShuffleInterval).After(startedPulling) {
+		if startedPulling.After(bf.lastShuffledAt.Add(bf.PeriodicalShuffleInterval)) {
 			bf.Logger.Infof("Last shuffle was %v ago, pull time limit (%v) for %s expired, will shuffle and connect to a different orderer node",
 				timeSinceLastShuffle, bf.PeriodicalShuffleInterval, bf.currentEndpoint.Endpoint)
 			bf.blockSourceOp = ShuffleSource
 			continue
 		}
-
 		block := blkSource.PullBlock(seq)
 
 		elapsed := bf.TimeNow().Sub(startedPulling)
@@ -488,9 +496,10 @@ func (bf *BlockFetcher) PullBlock(seq uint64) *common.Block {
 			blockwithheld := bf.probeForAttestation(seq)
 			if blockwithheld {
 				bf.Logger.Warnf("Detected withholding of block %d by %s", seq, bf.currentEndpoint.Endpoint)
+				bf.suspects.insert(bf.currentEndpoint.Endpoint)
 				bf.blockSourceOp = ShuffleSource
 			}
-			continue
+			// continue
 		}
 
 		retriesLeft--
@@ -505,7 +514,7 @@ func (bf BlockFetcher) HeightsByEndpoints() (map[string]uint64, error) {
 }
 
 // UpdateEndpoints assigns the new endpoints.
-func (p *BlockFetcher) updateEndpoints(endpoints []EndpointCriteria) {
+func (p *BlockFetcher) UpdateEndpoints(endpoints []EndpointCriteria) {
 	p.Logger.Debugf("Updating endpoints: %v", endpoints)
 	p.FetcherConfig.Endpoints = endpoints
 	p.currentBlockSource.UpdateEndpoints(endpoints)

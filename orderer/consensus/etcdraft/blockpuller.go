@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric-protos-go/common"
-	"github.com/hyperledger/fabric-protos-go/orderer"
 	"github.com/hyperledger/fabric/bccsp"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
@@ -151,32 +150,46 @@ func NewBlockFetcher(support consensus.ConsenterSupport,
 	// TODO: change this to use the new mapping of consenters in the channel config
 	// To tolerate byzantine behaviour of `f` faulty nodes, we need a total of `3f + 1` nodes.
 	// f = maxByzantineNodes, total = len(endpoints)
-	maxByzantineNodes := uint64(len(endpoints)-1) / 3
-
-	// timeout for time based shuffling
-	shuffleTimeout := shuffleTimeoutMultiplier * clusterConfig.ReplicationPullTimeout
-	shuffleTimeoutThrehold := shuffleTimeoutPercentage
+	maxByzantineNodes := (len(endpoints) - 1) / 3
 
 	fc := cluster.FetcherConfig{
-		ShuffleTimeout:               shuffleTimeout,
-		CensorshipSuspicionThreshold: time.Minute,
-		MaxByzantineNodes:            maxByzantineNodes,
 		Channel:                      support.ChannelID(),
 		TLSCert:                      der.Bytes,
 		Endpoints:                    endpoints,
 		FetchTimeout:                 clusterConfig.ReplicationPullTimeout,
+		CensorshipSuspicionThreshold: time.Duration((int64(clusterConfig.ReplicationPullTimeout) * shuffleTimeoutPercentage / 100)),
+		PeriodicalShuffleInterval:    shuffleTimeoutMultiplier * clusterConfig.ReplicationPullTimeout,
+		MaxRetries:                   uint64(clusterConfig.ReplicationMaxRetries),
+		MaxByzantineNodes:            maxByzantineNodes,
+	}
+
+	// TODO: Should this func be moved to `orderer/common/cluster` package
+	blockVerifierFunc := func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
+		return verifyBlockSequence([]*common.Block{
+			{
+				Header:   header,
+				Metadata: metadata,
+			},
+		}, support.ChannelID())
 	}
 
 	bf := cluster.BlockFetcher{
-		Signer: support,
-		Dialer: stdDialer,
-		AttestationSourceFactory: func(c cluster.FetcherConfig) cluster.AttestationSource {
+		FetcherConfig:   fc,
+		LastConfigBlock: &common.Block{},
+		BlockVerifierFactory: func(block *common.Block) cluster.BlockVerifierFunc {
+			// block is a config block
+			return blockVerifierFunc
+		},
+		VerifyBlock: blockVerifierFunc,
+		AttestationSourceFactory: func(c cluster.FetcherConfig, latestConfigBlock *common.Block) cluster.AttestationSource {
+			// TODO: update FetcherConfig from latestConfigBlock
 			return &cluster.AttestationPuller{
 				Config: fc,
 				Logger: flogging.MustGetLogger("orderer.common.cluster.attestationpuller").With("channel", support.ChannelID()),
 			}
 		},
-		BlockSourceFactory: func(c cluster.FetcherConfig) cluster.BlockSource {
+		BlockSourceFactory: func(c cluster.FetcherConfig, latestConfigBlock *common.Block) cluster.BlockSource {
+			// TODO: update FetcherConfig from latestConfigBlock
 			return &cluster.BlockPuller{
 				VerifyBlockSequence: verifyBlockSequence,
 				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID()),
@@ -184,39 +197,16 @@ func NewBlockFetcher(support consensus.ConsenterSupport,
 				MaxTotalBufferBytes: clusterConfig.ReplicationBufferSize,
 				FetchTimeout:        clusterConfig.ReplicationPullTimeout,
 				Endpoints:           c.Endpoints,
-				Signer:              c.Signer,
+				Signer:              support,
 				TLSCert:             der.Bytes,
 				Channel:             c.Channel,
 				Dialer:              stdDialer,
 				StopChannel:         make(chan struct{}),
 			}
 		},
-		FetcherConfig:     fc,
-		Logger:            flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID()),
-		ShuffleTimeout:    shuffleTimeout,
-		LastShuffledAt:    time.Now(),
-		MaxByzantineNodes: maxByzantineNodes,
-		VerifyAttestation: func(attestations []*orderer.BlockAttestation) bool {
-			if attestations == nil {
-				return true
-			}
-			isAttestationForged := func(a *orderer.BlockAttestation) bool {
-				err := verifyBlockSequence([]*common.Block{{Header: a.Header, Metadata: a.Metadata}}, support.ChannelID())
-				return err != nil
-			}
-			// the source is suspected for malicious behaviour if the attestations list has atleast one valid attestation
-			// check for the validity of each attestation, so that a forged attestation may not mislead us to suspect the source,
-			// i.e. funtcion should not return a false positive.
-			for _, a := range attestations {
-				if a != nil {
-					if isAttestationForged(a) {
-						continue
-					}
-					return true
-				}
-			}
-			return false
-		},
+		Logger:  flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID()),
+		Signer:  support,
+		Dialer:  stdDialer,
 		TimeNow: time.Now,
 	}
 
