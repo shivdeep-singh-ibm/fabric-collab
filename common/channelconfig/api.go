@@ -117,6 +117,8 @@ type Orderer interface {
 	// used for ordering
 	KafkaBrokers() []string
 
+	Consenters() []*cb.Consenter
+
 	// Organizations returns the organizations for the ordering service
 	Organizations() map[string]OrdererOrg
 
