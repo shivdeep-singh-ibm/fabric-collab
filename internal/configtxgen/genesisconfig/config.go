@@ -416,7 +416,7 @@ loop:
 			cf.TranslatePathInPlace(configDir, &serverCertPath)
 			c.ServerTlsCert = []byte(serverCertPath)
 		}
-	case "smartbft":
+	case "BFT":
 		if len(ord.ConsenterMapping) == 0 {
 			logger.Panic("Orderer.Orderers.ConsenterMapping missing")
 		}

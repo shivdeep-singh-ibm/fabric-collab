@@ -303,24 +303,24 @@ func MultiNodeEtcdRaft() *Config {
 	return config
 }
 
-func MultiNodeSmartBft() *Config {
+func MultiNodeBFT() *Config {
 	config := BasicSolo()
 
-	config.Consensus.Type = "smartbft"
+	config.Consensus.Type = "BFT"
 	config.Orderers = []*Orderer{
 		{Name: "orderer1", Organization: "OrdererOrg"},
 		{Name: "orderer2", Organization: "OrdererOrg"},
 		{Name: "orderer3", Organization: "OrdererOrg"},
 	}
 	config.Profiles = []*Profile{{
-		Name:     "SampleDevModeSmartBFT",
+		Name:     "SampleDevModeBFT",
 		Orderers: []string{"orderer1", "orderer2", "orderer3"},
 	}, {
 		Name:          "TwoOrgsChannel",
 		Consortium:    "SampleConsortium",
 		Organizations: []string{"Org1", "Org2"},
 	}}
-	config.SystemChannel.Profile = "SampleDevModeSmartBFT"
+	config.SystemChannel.Profile = "SampleDevModeBFT"
 
 	return config
 }

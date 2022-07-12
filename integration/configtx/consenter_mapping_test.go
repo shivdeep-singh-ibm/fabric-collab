@@ -25,7 +25,7 @@ var _ = Describe("ConfigTx ConsenterMapping", func() {
 		testDir, err := ioutil.TempDir("", "configtx")
 		Expect(err).NotTo(HaveOccurred())
 
-		network := nwo.New(nwo.MultiNodeSmartBft(), testDir, nil, StartPort(), components)
+		network := nwo.New(nwo.MultiNodeBFT(), testDir, nil, StartPort(), components)
 
 		channelName := network.Channels[0].Name
 
@@ -36,7 +36,7 @@ var _ = Describe("ConfigTx ConsenterMapping", func() {
 		network.Bootstrap()
 
 		// check the config transaction in the genesis block contains the ConsenterMapping
-		sysProfile := genesisconfig.Load("SampleDevModeSmartBFT", network.RootDir)
+		sysProfile := genesisconfig.Load("SampleDevModeBFT", network.RootDir)
 		Expect(sysProfile.Orderer).NotTo(BeNil())
 		pgen := encoder.New(sysProfile)
 		genesisBlock := pgen.GenesisBlockForChannel(channelName)
@@ -53,5 +53,4 @@ var _ = Describe("ConfigTx ConsenterMapping", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(len(o.GetConsenterMapping())).To(Equal(3))
 	})
-
 })

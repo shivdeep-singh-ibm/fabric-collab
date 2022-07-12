@@ -43,8 +43,8 @@ const (
 	ConsensusTypeKafka = "kafka"
 	// ConsensusTypeEtcdRaft identifies the Raft-based consensus implementation.
 	ConsensusTypeEtcdRaft = "etcdraft"
-	// ConsensusTypeSmartBft identifies the SmartBFT-based consensus implementation.
-	ConsensusTypeSmartBft = "smartbft"
+	// ConsensusTypeBFT identifies the BFT-based consensus implementation.
+	ConsensusTypeBFT = "BFT"
 
 	// BlockValidationPolicyKey TODO
 	BlockValidationPolicyKey = "BlockValidation"
@@ -211,10 +211,10 @@ func NewOrdererGroup(conf *genesisconfig.Orderer) (*cb.ConfigGroup, error) {
 		if consensusMetadata, err = channelconfig.MarshalEtcdRaftMetadata(conf.EtcdRaft); err != nil {
 			return nil, errors.Errorf("cannot marshal metadata for orderer type %s: %s", ConsensusTypeEtcdRaft, err)
 		}
-	case ConsensusTypeSmartBft:
+	case ConsensusTypeBFT:
 		consenterProtos, err := consenterProtosFromConfig(conf.ConsenterMapping)
 		if err != nil {
-			return nil, errors.Errorf("cannot load consenter config for orderer type %s: %s", ConsensusTypeSmartBft, err)
+			return nil, errors.Errorf("cannot load consenter config for orderer type %s: %s", ConsensusTypeBFT, err)
 		}
 		addValue(ordererGroup, channelconfig.OrderersValue(consenterProtos), channelconfig.AdminsPolicyKey)
 	default:
