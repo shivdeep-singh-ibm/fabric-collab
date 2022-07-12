@@ -669,6 +669,7 @@ func bundleFromConfigBlock(block *common.Block, bccsp bccsp.BCCSP) (*channelconf
 	env := &common.Envelope{}
 	if err := proto.Unmarshal(block.Data.Data[0], env); err != nil {
 		return nil, createErrorFunc(err)
+
 	}
 
 	bundle, err := channelconfig.NewBundleFromEnvelope(env, bccsp)

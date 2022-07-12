@@ -264,9 +264,6 @@ type FetcherConfig struct {
 	MaxRetries                   uint64
 	MaxByzantineNodes            int
 }
-
-type BlockVerifierFunc func(header *common.BlockHeader, metadata *common.BlockMetadata) error
-
 type TimeFunc func() time.Time
 
 // BlockFetcher can be used to fetch blocks from orderers in a byzantine fault tolerant way.
