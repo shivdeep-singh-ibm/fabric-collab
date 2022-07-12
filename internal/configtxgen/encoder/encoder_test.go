@@ -443,9 +443,9 @@ var _ = Describe("Encoder", func() {
 			})
 		})
 
-		Context("when the consensus type is SmartBFT", func() {
+		Context("when the consensus type is BFT", func() {
 			BeforeEach(func() {
-				conf.OrdererType = "smartbft"
+				conf.OrdererType = "BFT"
 				conf.ConsenterMapping = []*genesisconfig.Consenter{
 					{
 						ID:    1,
