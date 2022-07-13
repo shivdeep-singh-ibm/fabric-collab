@@ -21,8 +21,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/DataDog/zstd v1.4.5 h1:EndNeuB0l9syBZhut0wns3gV1hL8zX8LIu6ZiVHWLIQ=
 github.com/DataDog/zstd v1.4.5/go.mod h1:1jcaCB/ufaK+sKp1NBhlGmpz41jOoPQ35bpF36t7BBo=
-github.com/Fabric-orderer-collaboration/fabric-protos-go v0.0.0-20220701081145-f1560e2741e3 h1:s2Nth9UeUP2HDTq1jBqQQU9OgaBHCJZzO74OyJrkUuc=
-github.com/Fabric-orderer-collaboration/fabric-protos-go v0.0.0-20220701081145-f1560e2741e3/go.mod h1:xVYTjK4DtZRBxZ2D9aE4y6AbLaPwue2o/criQyQbVD0=
+github.com/Fabric-orderer-collaboration/fabric-protos-go v0.0.0-20220712143337-5ec78871becf h1:2rHj3XkRFobW53X8cSwLVMJ5Sd/wTO3UXRDo6AXBetg=
+github.com/Fabric-orderer-collaboration/fabric-protos-go v0.0.0-20220712143337-5ec78871becf/go.mod h1:xVYTjK4DtZRBxZ2D9aE4y6AbLaPwue2o/criQyQbVD0=
 github.com/IBM/idemix v0.0.0-20220112103229-701e7610d405 h1:7cKDQL0CWDXO9acHJCCc7SUYpMcJ9H9NGVjLvwG66Nc=
 github.com/IBM/idemix v0.0.0-20220112103229-701e7610d405/go.mod h1:tBeRCKH37b2OkQRJVomLoYk8OjIMYQm+oRWFiJF0jQI=
 github.com/IBM/mathlib v0.0.0-20220112091634-0a7378db6912 h1:rySf+WTiafw7zS7P8GUcZGDd2nDTgLDUx51aIcCFuX4=
