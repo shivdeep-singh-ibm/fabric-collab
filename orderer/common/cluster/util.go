@@ -505,70 +505,71 @@ func BlockVerifierBuilder(bccsp bccsp.BCCSP) func(block *common.Block) BlockVeri
 
 		bftEnabled := bundle.ChannelConfig().Capabilities().ConsensusTypeBFT()
 
-		return func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
-			if len(metadata.Metadata) < int(common.BlockMetadataIndex_SIGNATURES)+1 {
-				return errors.Errorf("no signatures in block metadata")
-			}
-
-			md := &common.Metadata{}
-			if err := proto.Unmarshal(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], md); err != nil {
-				return errors.Wrapf(err, "error unmarshalling signatures from metadata: %v", err)
-			}
-
-			var signatureSet []*protoutil.SignedData
-			for _, metadataSignature := range md.Signatures {
-				var signerIdentity []byte
-				var signedPayload []byte
-				// if the SignatureHeader is empty and the IdentifierHeader is present, then  the consenter expects us to fetch its identity by its numeric identifier
-				if bftEnabled && len(metadataSignature.GetSignatureHeader()) == 0 && len(metadataSignature.GetIdentifierHeader()) > 0 {
-					identifierHeader, err := protoutil.UnmarshalIdentifierHeader(metadataSignature.IdentifierHeader)
-					if err != nil {
-						return fmt.Errorf("failed unmarshalling identifier header for block %d: %v", block.Header.Number, err)
-					}
-					identifier := identifierHeader.GetIdentifier()
-					signerIdentity = searchConsenterIdentityByID(bundle, identifier)
-					if len(signerIdentity) == 0 {
-						// The identifier is not within the consenter set // TODO should this be an error?
-						continue
-					}
-					signatureHeader := &common.SignatureHeader{
-						Creator: signerIdentity,
-						Nonce:   identifierHeader.Nonce,
-					}
-					signatureHeaderBytes, err := proto.Marshal(signatureHeader)
-					if err != nil {
-						return fmt.Errorf("failed marshalling signature header representing identifier %d for block %d: %v", identifier, block.Header.Number, err)
-					}
-					signedPayload = util.ConcatenateBytes(md.Value, signatureHeaderBytes, protoutil.BlockHeaderBytes(block.Header))
-				} else {
-					signatureHeader, err := protoutil.UnmarshalSignatureHeader(metadataSignature.GetSignatureHeader())
-					if err != nil {
-						return fmt.Errorf("failed unmarshalling signature header for block %d: %v", block.Header.Number, err)
-					}
-
-					signedPayload = util.ConcatenateBytes(md.Value, metadataSignature.SignatureHeader, protoutil.BlockHeaderBytes(block.Header))
-
-					signerIdentity = signatureHeader.Creator
-				}
-
-				signatureSet = append(
-					signatureSet,
-					&protoutil.SignedData{
-						Identity:  signerIdentity,
-						Data:      signedPayload,
-						Signature: metadataSignature.Signature,
-					},
-				)
-			}
-
-			return policy.EvaluateSignedData(signatureSet)
+		var consenters []*common.Consenter
+		if bftEnabled {
+			consenters = bundle.ChannelConfig().Orderers()
 		}
+
+		return verifyBlockSignature(bftEnabled, consenters, policy)
 
 	}
 }
 
-func searchConsenterIdentityByID(bundle *channelconfig.Bundle, identifier uint32) []byte {
-	for _, consenter := range bundle.ChannelConfig().Orderers() {
+func verifyBlockSignature(bftEnabled bool, consenters []*common.Consenter, policy policies.Policy) BlockVerifierFunc {
+	return func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
+		if len(metadata.Metadata) < int(common.BlockMetadataIndex_SIGNATURES)+1 {
+			return errors.Errorf("no signatures in block metadata")
+		}
+
+		md := &common.Metadata{}
+		if err := proto.Unmarshal(metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], md); err != nil {
+			return errors.Wrapf(err, "error unmarshalling signatures from metadata: %v", err)
+		}
+
+		var signatureSet []*protoutil.SignedData
+		for _, metadataSignature := range md.Signatures {
+			var signerIdentity []byte
+			var signedPayload []byte
+			// if the SignatureHeader is empty and the IdentifierHeader is present, then  the consenter expects us to fetch its identity by its numeric identifier
+			if bftEnabled && len(metadataSignature.GetSignatureHeader()) == 0 && len(metadataSignature.GetIdentifierHeader()) > 0 {
+				identifierHeader, err := protoutil.UnmarshalIdentifierHeader(metadataSignature.IdentifierHeader)
+				if err != nil {
+					return fmt.Errorf("failed unmarshalling identifier header for block %d: %v", header.Number, err)
+				}
+				identifier := identifierHeader.GetIdentifier()
+				signerIdentity = searchConsenterIdentityByID(consenters, identifier)
+				if len(signerIdentity) == 0 {
+					// The identifier is not within the consenter set
+					continue
+				}
+				signedPayload = util.ConcatenateBytes(md.Value, metadataSignature.IdentifierHeader, protoutil.BlockHeaderBytes(header))
+			} else {
+				signatureHeader, err := protoutil.UnmarshalSignatureHeader(metadataSignature.GetSignatureHeader())
+				if err != nil {
+					return fmt.Errorf("failed unmarshalling signature header for block %d: %v", header.Number, err)
+				}
+
+				signedPayload = util.ConcatenateBytes(md.Value, metadataSignature.SignatureHeader, protoutil.BlockHeaderBytes(header))
+
+				signerIdentity = signatureHeader.Creator
+			}
+
+			signatureSet = append(
+				signatureSet,
+				&protoutil.SignedData{
+					Identity:  signerIdentity,
+					Data:      signedPayload,
+					Signature: metadataSignature.Signature,
+				},
+			)
+		}
+
+		return policy.EvaluateSignedData(signatureSet)
+	}
+}
+
+func searchConsenterIdentityByID(consenters []*common.Consenter, identifier uint32) []byte {
+	for _, consenter := range consenters {
 		if consenter.Id == identifier {
 			return protoutil.MarshalOrPanic(&msp.SerializedIdentity{
 				Mspid:   consenter.MspId,
