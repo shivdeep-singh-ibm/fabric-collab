@@ -21,6 +21,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/msp"
+	"github.com/hyperledger/fabric/bccsp"
 	"github.com/hyperledger/fabric/bccsp/sw"
 	"github.com/hyperledger/fabric/common/capabilities"
 	"github.com/hyperledger/fabric/common/channelconfig"
@@ -1226,4 +1227,25 @@ func TestComparisonMemoizer(t *testing.T) {
 		require.Equal(t, i%2 != 0, odd)
 		require.LessOrEqual(t, m.Size(), int(m.MaxEntries))
 	}
+}
+
+//go:generate counterfeiter -o mocks/bccsp.go --fake-name BCCSP . iBCCSP
+
+type iBCCSP interface {
+	bccsp.BCCSP
+}
+
+func TestBlockVerifierBuilderEmptyBlock(t *testing.T) {
+	bvfunc := cluster.BlockVerifierBuilder(&mocks.BCCSP{})
+	block := &common.Block{}
+	verifier := bvfunc(block)
+	require.ErrorContains(t, verifier(nil, nil), "initialized with an invalid config block: block contains no data")
+}
+
+func TestBlockVerifierBuilderNoConfigBlock(t *testing.T) {
+	bvfunc := cluster.BlockVerifierBuilder(&mocks.BCCSP{})
+	block := createBlockChain(3, 3)[0]
+	verifier := bvfunc(block)
+	md := &common.BlockMetadata{}
+	require.ErrorContains(t, verifier(nil, md), "initialized with an invalid config block: channelconfig Config cannot be nil")
 }
