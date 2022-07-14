@@ -510,12 +510,12 @@ func BlockVerifierBuilder(bccsp bccsp.BCCSP) func(block *common.Block) BlockVeri
 			consenters = bundle.ChannelConfig().Orderers()
 		}
 
-		return verifyBlockSignature(bftEnabled, consenters, policy)
+		return blockSignatureVerifier(bftEnabled, consenters, policy)
 
 	}
 }
 
-func verifyBlockSignature(bftEnabled bool, consenters []*common.Consenter, policy policies.Policy) BlockVerifierFunc {
+func blockSignatureVerifier(bftEnabled bool, consenters []*common.Consenter, policy policies.Policy) BlockVerifierFunc {
 	return func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
 		if len(metadata.Metadata) < int(common.BlockMetadataIndex_SIGNATURES)+1 {
 			return errors.Errorf("no signatures in block metadata")
