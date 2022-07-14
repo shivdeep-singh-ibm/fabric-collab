@@ -30,6 +30,7 @@ import (
 	"github.com/hyperledger/fabric/protoutil"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 )
 
 // ConnByCertMap maps certificates represented as strings
@@ -485,6 +486,71 @@ func globalEndpointsFromConfig(aggregatedTLSCerts [][]byte, bundle *channelconfi
 		})
 	}
 	return globalEndpoints
+}
+
+type BlockVerifierFunc func(header *common.BlockHeader, metadata *common.BlockMetadata) error
+
+func BlockVerifierBuilder(bccsp bccsp.BCCSP) func(block *common.Block) BlockVerifierFunc {
+	return func(block *common.Block) BlockVerifierFunc {
+		bundle, failed := bundleFromConfigBlock(block, bccsp)
+		if failed != nil {
+			return failed
+		}
+
+		policy, exists := bundle.PolicyManager().GetPolicy(policies.BlockValidation)
+		if !exists {
+			return invalidConfigBlockInit
+		}
+
+		bftEnabled := bundle.ChannelConfig().Capabilities().ConsensusTypeBFT()
+		_ = bftEnabled
+
+		return func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
+			if len(metadata.Metadata) < int(common.BlockMetadataIndex_SIGNATURES)+1 {
+				return errors.Errorf("no signatures in block metadata")
+			}
+
+			md := &common.Metadata{}
+			if err := proto.Unmarshal(block.Metadata.Metadata[common.BlockMetadataIndex_SIGNATURES], md); err != nil {
+				return errors.Wrapf(err, "error unmarshalling signatures from metadata: %v", err)
+			}
+
+			var signatureSet []*protoutil.SignedData
+			for _, metadataSignature := range md.Signatures {
+				signatureHeader, err := protoutil.UnmarshalSignatureHeader(metadataSignature.SignatureHeader)
+				if err != nil {
+					return fmt.Errorf("failed unmarshalling signature header for block %d: %v", block.Header.Number, err)
+				}
+
+				signedPayload := util.ConcatenateBytes(md.Value, metadataSignature.SignatureHeader, protoutil.BlockHeaderBytes(block.Header))
+
+				signerIdentity := signatureHeader.Creator
+
+				// TODO: Here we check if the consenter expects us to fetch its identity by its numeric identifier, we can enable this once we introduce referencing by identifiers
+				/*				if bftEnabled && len(signerIdentity) == 0 {
+								identifier := signatureHeader.NotYetIntroducedFieldThatIsTheConsentersIdentifier
+								identifier := uint64(1)
+								signerIdentity = searchConsenterIdentityByID(bundle, identifier)
+								if len(signerIdentity) == 0 {
+									// The identifier is not within the consenter set
+									continue
+								}
+							}*/
+
+				signatureSet = append(
+					signatureSet,
+					&protoutil.SignedData{
+						Identity:  signerIdentity,
+						Data:      signedPayload,
+						Signature: metadataSignature.Signature,
+					},
+				)
+			}
+
+			return policy.EvaluateSignedData(signatureSet)
+		}
+
+	}
 }
 
 //go:generate mockery -dir . -name VerifierFactory -case underscore -output ./mocks/
