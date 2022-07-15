@@ -148,9 +148,6 @@ func NewBlockFetcher(support consensus.ConsenterSupport,
 	}
 
 	// TODO: change this to use the new mapping of consenters in the channel config
-	// To tolerate byzantine behaviour of `f` faulty nodes, we need a total of `3f + 1` nodes.
-	// f = maxByzantineNodes, total = len(endpoints)
-	maxByzantineNodes := (len(endpoints) - 1) / 3
 
 	fc := cluster.FetcherConfig{
 		Channel:                      support.ChannelID(),
@@ -160,51 +157,49 @@ func NewBlockFetcher(support consensus.ConsenterSupport,
 		CensorshipSuspicionThreshold: time.Duration((int64(clusterConfig.ReplicationPullTimeout) * shuffleTimeoutPercentage / 100)),
 		PeriodicalShuffleInterval:    shuffleTimeoutMultiplier * clusterConfig.ReplicationPullTimeout,
 		MaxRetries:                   uint64(clusterConfig.ReplicationMaxRetries),
-		MaxByzantineNodes:            maxByzantineNodes,
 	}
 
-	// TODO: Should this func be moved to `orderer/common/cluster` package
-	blockVerifierFunc := func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
-		return verifyBlockSequence([]*common.Block{
-			{
-				Header:   header,
-				Metadata: metadata,
-			},
-		}, support.ChannelID())
+	bf_logger := flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID())
+
+	lastConfigBlock, err := lastConfigBlockFromSupport(support)
+	if err != nil {
+		return nil, err
 	}
+
+	verifierFactory := cluster.BlockVerifierBuilder(bccsp)
 
 	bf := cluster.BlockFetcher{
-		FetcherConfig:   fc,
-		LastConfigBlock: &common.Block{},
-		BlockVerifierFactory: func(block *common.Block) cluster.BlockVerifierFunc {
-			// block is a config block
-			return blockVerifierFunc
-		},
-		VerifyBlock: blockVerifierFunc,
+		FetcherConfig:        fc,
+		LastConfigBlock:      lastConfigBlock,
+		BlockVerifierFactory: verifierFactory,
+		VerifyBlock:          verifierFactory(lastConfigBlock),
 		AttestationSourceFactory: func(c cluster.FetcherConfig, latestConfigBlock *common.Block) cluster.AttestationSource {
-			// TODO: update FetcherConfig from latestConfigBlock
+			fc, err := cluster.UpdateFetcherConfigFromConfigBlock(c, latestConfigBlock)
+			bf_logger.Errorf("Could not update FetcherConfig fom Config Block: %v", err)
 			return &cluster.AttestationPuller{
 				Config: fc,
-				Logger: flogging.MustGetLogger("orderer.common.cluster.attestationpuller").With("channel", support.ChannelID()),
+				Logger: flogging.MustGetLogger("orderer.common.cluster.attestationpuller").With("channel", fc.Channel),
 			}
 		},
 		BlockSourceFactory: func(c cluster.FetcherConfig, latestConfigBlock *common.Block) cluster.BlockSource {
-			// TODO: update FetcherConfig from latestConfigBlock
+			// update FetcherConfig from latestConfigBlock
+			fc, err := cluster.UpdateFetcherConfigFromConfigBlock(c, latestConfigBlock)
+			bf_logger.Errorf("Could not update FetcherConfig fom Config Block: %v", err)
 			return &cluster.BlockPuller{
 				VerifyBlockSequence: verifyBlockSequence,
-				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID()),
+				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", fc.Channel),
 				RetryTimeout:        clusterConfig.ReplicationRetryTimeout,
 				MaxTotalBufferBytes: clusterConfig.ReplicationBufferSize,
 				FetchTimeout:        clusterConfig.ReplicationPullTimeout,
-				Endpoints:           c.Endpoints,
+				Endpoints:           fc.Endpoints,
 				Signer:              support,
 				TLSCert:             der.Bytes,
-				Channel:             c.Channel,
+				Channel:             fc.Channel,
 				Dialer:              stdDialer,
 				StopChannel:         make(chan struct{}),
 			}
 		},
-		Logger:  flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID()),
+		Logger:  bf_logger,
 		Signer:  support,
 		Dialer:  stdDialer,
 		TimeNow: time.Now,

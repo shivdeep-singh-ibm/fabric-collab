@@ -264,6 +264,21 @@ type FetcherConfig struct {
 	MaxRetries                   uint64
 	MaxByzantineNodes            int
 }
+
+// UpdateFetcherConfigFromConfigBlock updates the endpoints in fetcherconfig from a config block.
+// if it is unable to fetch endpoints from a config block, it doesn't udate the endpoints in FetcherConfig.
+// the error returned may be logged.
+func UpdateFetcherConfigFromConfigBlock(c FetcherConfig, latestConfigBlock *common.Block) (FetcherConfig, error) {
+	fetcherConfig := c
+	endpoints, err := EndpointconfigFromConfigBlockV3(latestConfigBlock)
+	if err == nil {
+		// update endpoints from config block
+		fetcherConfig.Endpoints = endpoints
+	}
+
+	return fetcherConfig, err
+}
+
 type TimeFunc func() time.Time
 
 // BlockFetcher can be used to fetch blocks from orderers in a byzantine fault tolerant way.

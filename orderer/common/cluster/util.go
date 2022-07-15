@@ -567,31 +567,46 @@ func globalEndpointsFromConfig(aggregatedTLSCerts [][]byte, bundle *channelconfi
 	return globalEndpoints
 }
 
+// BFTEnabledInConfig takes a config block as input and returns true if consenter type is BFT
+func BFTEnabledInConfig(block *common.Block, bccsp bccsp.BCCSP) bool {
+	bftEnabled, _, _, _ := getConsentersAndPolicyFromConfigBlock(block, bccsp)
+	return bftEnabled
+}
+
+// getConsentersAndPolicyFromConfigBlock returns a tuple of (bftEnabled, consenters, policy, error)
+func getConsentersAndPolicyFromConfigBlock(block *common.Block, bccsp bccsp.BCCSP) (bool, []*common.Consenter, policies.Policy, error) {
+	bundle, failed := bundleFromConfigBlock(block, bccsp)
+	if failed != nil {
+		return false, nil, nil, failed
+	}
+
+	policy, exists := bundle.PolicyManager().GetPolicy(policies.BlockValidation)
+	if !exists {
+		return false, nil, nil, errors.New("no policies in config block")
+	}
+
+	bftEnabled := bundle.ChannelConfig().Capabilities().ConsensusTypeBFT()
+
+	var consenters []*common.Consenter
+	if bftEnabled {
+		cfg, ok := bundle.OrdererConfig()
+		if !ok {
+			return false, nil, nil, errors.New("no orderer section in config block")
+		}
+		consenters = cfg.Consenters()
+	}
+
+	return bftEnabled, consenters, policy, nil
+}
+
 type BlockVerifierFunc func(header *common.BlockHeader, metadata *common.BlockMetadata) error
 
 func BlockVerifierBuilder(bccsp bccsp.BCCSP) func(block *common.Block) BlockVerifierFunc {
 	return func(block *common.Block) BlockVerifierFunc {
-		bundle, failed := bundleFromConfigBlock(block, bccsp)
-		if failed != nil {
-			return failed
+		bftEnabled, consenters, policy, err := getConsentersAndPolicyFromConfigBlock(block, bccsp)
+		if err != nil {
+			return createErrorFunc(err)
 		}
-
-		policy, exists := bundle.PolicyManager().GetPolicy(policies.BlockValidation)
-		if !exists {
-			return createErrorFunc(errors.New("no policies in config block"))
-		}
-
-		bftEnabled := bundle.ChannelConfig().Capabilities().ConsensusTypeBFT()
-
-		var consenters []*common.Consenter
-		if bftEnabled {
-			cfg, ok := bundle.OrdererConfig()
-			if !ok {
-				return createErrorFunc(errors.New("no orderer section in config block"))
-			}
-			consenters = cfg.Consenters()
-		}
-
 		return blockSignatureVerifier(bftEnabled, consenters, policy)
 	}
 }
@@ -661,20 +676,19 @@ func searchConsenterIdentityByID(consenters []*common.Consenter, identifier uint
 	return nil
 }
 
-func bundleFromConfigBlock(block *common.Block, bccsp bccsp.BCCSP) (*channelconfig.Bundle, BlockVerifierFunc) {
+func bundleFromConfigBlock(block *common.Block, bccsp bccsp.BCCSP) (*channelconfig.Bundle, error) {
 	if block.Data == nil || len(block.Data.Data) == 0 {
-		return nil, createErrorFunc(errors.New("block contains no data"))
+		return nil, errors.New("block contains no data")
 	}
 
 	env := &common.Envelope{}
 	if err := proto.Unmarshal(block.Data.Data[0], env); err != nil {
-		return nil, createErrorFunc(err)
-
+		return nil, err
 	}
 
 	bundle, err := channelconfig.NewBundleFromEnvelope(env, bccsp)
 	if err != nil {
-		return nil, createErrorFunc(err)
+		return nil, err
 	}
 
 	return bundle, nil

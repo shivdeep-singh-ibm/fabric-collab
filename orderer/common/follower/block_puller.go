@@ -142,27 +142,27 @@ func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopC
 		CensorshipSuspicionThreshold: time.Duration((int64(creator.clusterConfig.ReplicationPullTimeout) * shuffleTimeoutPercentage / 100)),
 		PeriodicalShuffleInterval:    shuffleTimeoutMultiplier * creator.clusterConfig.ReplicationPullTimeout,
 		MaxRetries:                   uint64(creator.clusterConfig.ReplicationMaxRetries),
-		MaxByzantineNodes:            (len(endpoints) - 1) / 3,
 	}
 
-	blockVerifierFunc := func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
-		return creator.VerifyBlockSequence([]*common.Block{
-			{
-				Header:   header,
-				Metadata: metadata,
-			},
-		}, creator.channelID)
+	// To tolerate byzantine behaviour of `f` faulty nodes, we need atleast of `3f + 1` nodes.
+	// check for bft enable and update `MaxByzantineNodes`
+	// accordingly.
+	bftEnabled := cluster.BFTEnabledInConfig(configBlock, creator.bccsp)
+	if bftEnabled {
+		fc.MaxByzantineNodes = int((len(endpoints) - 1) / 3)
 	}
+
+	verifierFactory := cluster.BlockVerifierBuilder(creator.bccsp)
+	bf_logger := flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID)
 
 	bf := &cluster.BlockFetcher{
-		FetcherConfig:   fc,
-		LastConfigBlock: configBlock,
-		BlockVerifierFactory: func(block *common.Block) cluster.BlockVerifierFunc {
-			// block is a config block
-			return blockVerifierFunc
-		},
-		VerifyBlock: blockVerifierFunc,
+		FetcherConfig:        fc,
+		LastConfigBlock:      configBlock,
+		BlockVerifierFactory: verifierFactory,
+		VerifyBlock:          verifierFactory(configBlock),
 		AttestationSourceFactory: func(c cluster.FetcherConfig, latestConfigBlock *common.Block) cluster.AttestationSource {
+			fc, err := cluster.UpdateFetcherConfigFromConfigBlock(c, latestConfigBlock)
+			bf_logger.Errorf("Could not update FetcherConfig fom Config Block: %v", err)
 			return &cluster.AttestationPuller{
 				Logger: flogging.MustGetLogger("orderer.common.cluster.attestationpuller").With("channel", creator.channelID),
 				Signer: creator.signer,
@@ -171,21 +171,24 @@ func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopC
 			}
 		},
 		BlockSourceFactory: func(c cluster.FetcherConfig, latestConfigBlock *common.Block) cluster.BlockSource {
+			fc, err := cluster.UpdateFetcherConfigFromConfigBlock(c, latestConfigBlock)
+			bf_logger.Errorf("Could not update FetcherConfig fom Config Block: %v", err)
 			return &cluster.BlockPuller{
 				MaxPullBlockRetries: uint64(creator.clusterConfig.ReplicationMaxRetries),
 				MaxTotalBufferBytes: creator.clusterConfig.ReplicationBufferSize,
 				Signer:              creator.signer,
 				TLSCert:             creator.der.Bytes,
-				Channel:             c.Channel, FetchTimeout: creator.clusterConfig.ReplicationPullTimeout,
+				Channel:             fc.Channel,
+				FetchTimeout:        creator.clusterConfig.ReplicationPullTimeout,
 				RetryTimeout:        creator.clusterConfig.ReplicationRetryTimeout,
-				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
+				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", fc.Channel),
 				Dialer:              creator.stdDialer,
 				VerifyBlockSequence: creator.VerifyBlockSequence,
-				Endpoints:           c.Endpoints,
+				Endpoints:           fc.Endpoints,
 				StopChannel:         stopChannel,
 			}
 		},
-		Logger:  flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
+		Logger:  bf_logger,
 		TimeNow: time.Now,
 		Signer:  creator.signer,
 		Dialer:  creator.stdDialer,
