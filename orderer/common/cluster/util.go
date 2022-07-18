@@ -507,11 +507,14 @@ func BlockVerifierBuilder(bccsp bccsp.BCCSP) func(block *common.Block) BlockVeri
 
 		var consenters []*common.Consenter
 		if bftEnabled {
-			consenters = bundle.ChannelConfig().Orderers()
+			cfg, ok := bundle.OrdererConfig()
+			if !ok {
+				return createErrorFunc(errors.New("no orderer section in config block"))
+			}
+			consenters = cfg.Consenters()
 		}
 
 		return blockSignatureVerifier(bftEnabled, consenters, policy)
-
 	}
 }
 
