@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/msp"
+	"github.com/hyperledger/fabric-protos-go/orderer"
 	"github.com/hyperledger/fabric/bccsp"
 	"github.com/hyperledger/fabric/bccsp/sw"
 	"github.com/hyperledger/fabric/common/capabilities"
@@ -1250,6 +1252,28 @@ func TestBlockVerifierBuilderNoConfigBlock(t *testing.T) {
 	require.ErrorContains(t, verifier(nil, md), "initialized with an invalid config block: channelconfig Config cannot be nil")
 }
 
+func TestBlockVerifierFunc(t *testing.T) {
+	block := sampleConfigBlock()
+	bvfunc := cluster.BlockVerifierBuilder(&mocks.BCCSP{})
+
+	verifier := bvfunc(block)
+
+	header := &common.BlockHeader{}
+	md := &common.BlockMetadata{
+		Metadata: [][]byte{
+			protoutil.MarshalOrPanic(&common.Metadata{Signatures: []*common.MetadataSignature{
+				{
+					Signature:        []byte{},
+					IdentifierHeader: protoutil.MarshalOrPanic(&common.IdentifierHeader{Identifier: 1}),
+				},
+			}}),
+		},
+	}
+
+	err := verifier(header, md)
+	require.NoError(t, err)
+}
+
 func TestBlockSignatureVerifierEmptyMetadata(t *testing.T) {
 	policies := mocks.Policy{}
 
@@ -1361,4 +1385,92 @@ func TestBlockSignatureVerifierByCreator(t *testing.T) {
 	signatureSet := policies.EvaluateSignedDataArgsForCall(0)
 	require.Len(t, signatureSet, 1)
 	require.Equal(t, []byte("creator1"), signatureSet[0].Identity)
+}
+
+func sampleConfigBlock() *common.Block {
+	return &common.Block{
+		Header: &common.BlockHeader{
+			PreviousHash: []byte("foo"),
+		},
+		Data: &common.BlockData{
+			Data: [][]byte{
+				protoutil.MarshalOrPanic(&common.Envelope{
+					Payload: protoutil.MarshalOrPanic(&common.Payload{
+						Header: &common.Header{
+							ChannelHeader: protoutil.MarshalOrPanic(&common.ChannelHeader{
+								Type:      int32(common.HeaderType_CONFIG),
+								ChannelId: "mychannel",
+							}),
+						},
+						Data: protoutil.MarshalOrPanic(&common.ConfigEnvelope{
+							Config: &common.Config{
+								ChannelGroup: &common.ConfigGroup{
+									Values: map[string]*common.ConfigValue{
+										"Capabilities": {
+											Value: protoutil.MarshalOrPanic(&common.Capabilities{
+												Capabilities: map[string]*common.Capability{"V3_0": {}},
+											}),
+										},
+										"HashingAlgorithm": {
+											Value: protoutil.MarshalOrPanic(&common.HashingAlgorithm{Name: "SHA256"}),
+										},
+										"BlockDataHashingStructure": {
+											Value: protoutil.MarshalOrPanic(&common.BlockDataHashingStructure{Width: math.MaxUint32}),
+										},
+									},
+									Groups: map[string]*common.ConfigGroup{
+										"Orderer": {
+											Policies: map[string]*common.ConfigPolicy{
+												"BlockValidation": {
+													Policy: &common.Policy{
+														Type: 3,
+													},
+												},
+											},
+											Values: map[string]*common.ConfigValue{
+												"BatchSize": {
+													Value: protoutil.MarshalOrPanic(&orderer.BatchSize{
+														MaxMessageCount:   500,
+														AbsoluteMaxBytes:  10485760,
+														PreferredMaxBytes: 2097152,
+													}),
+												},
+												"BatchTimeout": {
+													Value: protoutil.MarshalOrPanic(&orderer.BatchTimeout{
+														Timeout: "2s",
+													}),
+												},
+												"Capabilities": {
+													Value: protoutil.MarshalOrPanic(&common.Capabilities{
+														Capabilities: map[string]*common.Capability{"V3_0": {}},
+													}),
+												},
+												"ConsensusType": {
+													Value: protoutil.MarshalOrPanic(&common.BlockData{Data: [][]byte{[]byte("BFT")}}),
+												},
+												"Orderers": {
+													Value: protoutil.MarshalOrPanic(&common.Orderers{
+														ConsenterMapping: []*common.Consenter{
+															{
+																Id:       1,
+																Host:     "host1",
+																Port:     8001,
+																MspId:    "msp1",
+																Identity: []byte("identity1"),
+															},
+														},
+													}),
+												},
+											},
+										},
+									},
+								},
+							},
+						}),
+					}),
+					Signature: []byte("bar"),
+				}),
+			},
+		},
+	}
 }
