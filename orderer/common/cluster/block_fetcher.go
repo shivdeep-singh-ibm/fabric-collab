@@ -354,7 +354,7 @@ func (bf *BlockFetcher) maybeUpdateLatestConfigBlock(block *common.Block) {
 			bf.Logger.Errorf("Failed parsing orderer endpoints from block %d: %v", block.Header.Number, err)
 			return
 		}
-		bf.UpdateEndpoints(endpoints)
+		bf.updateEndpoints(endpoints)
 	}
 }
 
@@ -526,7 +526,7 @@ func (bf BlockFetcher) HeightsByEndpoints() (map[string]uint64, error) {
 }
 
 // UpdateEndpoints assigns the new endpoints.
-func (p *BlockFetcher) UpdateEndpoints(endpoints []EndpointCriteria) {
+func (p *BlockFetcher) updateEndpoints(endpoints []EndpointCriteria) {
 	p.Logger.Debugf("Updating endpoints: %v", endpoints)
 	p.FetcherConfig.Endpoints = endpoints
 	p.currentBlockSource.UpdateEndpoints(endpoints)

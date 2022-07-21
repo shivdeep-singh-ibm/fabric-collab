@@ -625,7 +625,7 @@ func TestFollowerPullAfterJoin(t *testing.T) {
 		}
 
 		require.Equal(t, 1, mockChainCreator.SwitchFollowerToChainCallCount())
-		require.Equal(t, 259, timeAfterCount.AfterCallCount())
+		require.Equal(t, 255, timeAfterCount.AfterCallCount())
 		require.Equal(t, int64(5000), atomic.LoadInt64(&maxDelay))
 	})
 }
@@ -858,7 +858,7 @@ func TestFollowerPullPastJoin(t *testing.T) {
 		}
 
 		require.Equal(t, 1, mockChainCreator.SwitchFollowerToChainCallCount())
-		require.Equal(t, 309, timeAfterCount.AfterCallCount())
+		require.Equal(t, 305, timeAfterCount.AfterCallCount())
 		require.Equal(t, int64(5000), atomic.LoadInt64(&maxDelay))
 	})
 }

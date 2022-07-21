@@ -38,7 +38,6 @@ const (
 type ChannelPuller interface {
 	PullBlock(seq uint64) *common.Block
 	HeightsByEndpoints() (map[string]uint64, error)
-	UpdateEndpoints(endpoints []cluster.EndpointCriteria)
 	Close()
 }
 
@@ -102,32 +101,6 @@ func NewBlockPullerCreator(
 
 // BlockPuller creates a block puller on demand, taking the endpoints from the config block.
 func (creator *BlockPullerCreator) BlockPuller(configBlock *common.Block, stopChannel chan struct{}) (ChannelPuller, error) {
-	// Extract the TLS CA certs and endpoints from the join-block
-	endpoints, err := cluster.EndpointconfigFromConfigBlock(configBlock, creator.bccsp)
-	if err != nil {
-		return nil, errors.WithMessage(err, "error extracting endpoints from config block")
-	}
-
-	bp := &cluster.BlockPuller{
-		VerifyBlockSequence: creator.VerifyBlockSequence,
-		Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
-		RetryTimeout:        creator.clusterConfig.ReplicationRetryTimeout,
-		MaxTotalBufferBytes: creator.clusterConfig.ReplicationBufferSize,
-		MaxPullBlockRetries: uint64(creator.clusterConfig.ReplicationMaxRetries),
-		FetchTimeout:        creator.clusterConfig.ReplicationPullTimeout,
-		Endpoints:           endpoints,
-		Signer:              creator.signer,
-		TLSCert:             creator.der.Bytes,
-		Channel:             creator.channelID,
-		Dialer:              creator.stdDialer,
-		StopChannel:         stopChannel,
-	}
-
-	return bp, nil
-}
-
-// BlockFetcher creates a block fetcher on demand, taking the endpoints from the config block.
-func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopChannel chan struct{}) (ChannelPuller, error) {
 	// Extract the TLS CA certs and endpoints from the join-block
 	endpoints, err := cluster.EndpointconfigFromConfigBlock(configBlock, creator.bccsp)
 	if err != nil {

@@ -377,7 +377,7 @@ func (c *Chain) pullUpToJoin() error {
 	defer c.blockPuller.Close()
 	// Since we created the block-puller with the join-block, do not update the endpoints from the
 	// config blocks that precede it.
-	err = c.pullUntilLatestWithRetry(targetHeight, false)
+	err = c.pullUntilLatestWithRetry(targetHeight)
 	if err != nil {
 		return err
 	}
@@ -448,7 +448,7 @@ func (c *Chain) pullAfterJoin() error {
 		}
 
 		// Pull to latest height or chain stop signal
-		err = c.pullUntilLatestWithRetry(latestNetworkHeight, true)
+		err = c.pullUntilLatestWithRetry(latestNetworkHeight)
 		if err != nil {
 			return err
 		}
@@ -458,11 +458,10 @@ func (c *Chain) pullAfterJoin() error {
 // pullUntilLatestWithRetry is given a target-height and exits without an error when it reaches that target.
 // It return with an error only if the chain is stopped.
 // On internal pull errors it employs exponential back-off and retries.
-// When parameter updateEndpoints is true, the block-puller's endpoints are updated with every incoming config.
-func (c *Chain) pullUntilLatestWithRetry(latestNetworkHeight uint64, updateEndpoints bool) error {
+func (c *Chain) pullUntilLatestWithRetry(latestNetworkHeight uint64) error {
 	retryInterval := c.options.PullRetryMinInterval
 	for {
-		numPulled, errPull := c.pullUntilTarget(latestNetworkHeight, updateEndpoints)
+		numPulled, errPull := c.pullUntilTarget(latestNetworkHeight)
 		if numPulled > 0 {
 			c.resetRetryInterval(&retryInterval, c.options.PullRetryMinInterval) // On any progress, reset retry interval.
 		}
@@ -490,7 +489,7 @@ func (c *Chain) pullUntilLatestWithRetry(latestNetworkHeight uint64, updateEndpo
 // It may return with an error before the target, always returning the number of blocks pulled.
 // When parameter updateEndpoints is true, the block-puller's endpoints are updated with every incoming config.
 // The block-puller-factory which holds the block signature verifier is updated on every incoming config.
-func (c *Chain) pullUntilTarget(targetHeight uint64, updateEndpoints bool) (uint64, error) {
+func (c *Chain) pullUntilTarget(targetHeight uint64) (uint64, error) {
 	firstBlockToPull := c.ledgerResources.Height()
 	if firstBlockToPull >= targetHeight {
 		c.logger.Debugf("Target height (%d) is <= to our ledger height (%d), skipping pulling", targetHeight, firstBlockToPull)
@@ -534,13 +533,6 @@ func (c *Chain) pullUntilTarget(targetHeight uint64, updateEndpoints bool) (uint
 				c.lastConfig = nextBlock
 				if err := c.blockPullerFactory.UpdateVerifierFromConfigBlock(nextBlock); err != nil {
 					return n, errors.WithMessagef(err, "failed to update verifier from last config,  block number: %d", nextBlock.Header.Number)
-				}
-				if updateEndpoints {
-					endpoints, err := cluster.EndpointconfigFromConfigBlock(nextBlock, c.cryptoProvider)
-					if err != nil {
-						return n, errors.WithMessagef(err, "failed to extract endpoints from last config,  block number: %d", nextBlock.Header.Number)
-					}
-					c.blockPuller.UpdateEndpoints(endpoints)
 				}
 			}
 		}
