@@ -35,7 +35,7 @@ require (
 	github.com/spf13/viper v1.7.0
 	github.com/stretchr/testify v1.7.1-0.20210116013205-6990a05d54c2 // includes ErrorContains
 	github.com/sykesm/zap-logfmt v0.0.4
-	github.com/syndtr/goleveldb v1.0.1-0.20210305035536-64b5b1c73954
+	github.com/syndtr/goleveldb
 	github.com/tedsuo/ifrit v0.0.0-20220120221754-dd274de71113
 	go.etcd.io/etcd/client/pkg/v3 v3.5.1
 	go.etcd.io/etcd/raft/v3 v3.5.1
