@@ -28,7 +28,7 @@ jobs:
         run: go install -mod=mod github.com/onsi/ginkgo/ginkgo@v1.16.4 && go get github.com/onsi/gomega/...
 
       - name: Vendor
-        run: go mod tidy -go=1.16 && go mod tidy -go=1.17 && go mod vendor
+        run: go mod tidy -go=1.17 && go mod vendor
 
       # Runs a single command using the runners shell
       - name: Unit Tests
