@@ -272,6 +272,23 @@ var _ = Describe("Metadata Validation", func() {
 				Expect(chain.ValidateConsensusMetadata(oldOrdererConfig, newOrdererConfig, newChannel)).To(Succeed())
 			})
 
+			It("fails on rotating certificate of an active node when one consenter is not connected", func() {
+				/* node 2 and 3 are connected, node 1 is not able to join */
+				chain.ActiveNodes.Store([]uint64{2, 3})
+
+				/* rotate the keys for node 3*/
+				newMetadata.Consenters = append(newMetadata.Consenters[:2], &etcdraftproto.Consenter{
+					Host:          "host4",
+					Port:          10004,
+					ClientTlsCert: clientTLSCert(tlsCA),
+					ServerTlsCert: serverTLSCert(tlsCA),
+				})
+				newBytes, _ := proto.Marshal(newMetadata)
+
+				Expect(chain.ValidateConsensusMetadata(oldBytes, newBytes, newChannel)).To(
+					MatchError("2 out of 3 nodes are alive, configuration will result in quorum loss"))
+			})
+
 			It("succeeds on addition of a single consenter", func() {
 				newMetadata := metadata
 				newMetadata.Consenters = append(newMetadata.Consenters, &raftprotos.Consenter{

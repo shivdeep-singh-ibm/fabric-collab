@@ -90,6 +90,13 @@ func TestQuorumCheck(t *testing.T) {
 			ActiveNodes:   []uint64{1, 2},
 			QuorumLoss:    false,
 		},
+		{
+			Name:          "[1,2,3]->[(1),2',3]",
+			NewConsenters: map[uint64]*etcdraftproto.Consenter{1: nil, 2: nil, 3: nil},
+			RotateNode:    2,
+			ActiveNodes:   []uint64{2, 3},
+			QuorumLoss:    true,
+		},
 		// Remove
 		{
 			Name:          "[1,2,(3)]->[1,2]",
