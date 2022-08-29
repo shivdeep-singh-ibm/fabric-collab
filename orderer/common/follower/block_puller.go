@@ -8,6 +8,7 @@ package follower
 
 import (
 	"encoding/pem"
+	"time"
 
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/bccsp"
@@ -17,6 +18,19 @@ import (
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/pkg/errors"
+)
+
+// TODO: keep these constants at one place tp
+// to prevent code duplication. These would be needed in the
+// consensus blockpuller.
+const (
+	// compute endpoint shuffle timeout from FetchTimeout
+	// endpoint shuffle timeout should be shuffleTimeoutMultiplier times FetchTimeout
+	shuffleTimeoutMultiplier = 10
+	// timeout expressed as a percentage of FetchtimeOut
+	// if PullBlock returns before (shuffleTimeoutPercentage% of FetchTimeOut of blockfetcher)
+	// the source is shuffled.
+	shuffleTimeoutPercentage = int64(50)
 )
 
 //go:generate counterfeiter -o mocks/channel_puller.go -fake-name ChannelPuller . ChannelPuller
@@ -111,6 +125,66 @@ func (creator *BlockPullerCreator) BlockPuller(configBlock *common.Block, stopCh
 	}
 
 	return bp, nil
+}
+
+// BlockFetcher creates a block fetcher on demand, taking the endpoints from the config block.
+func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopChannel chan struct{}) (ChannelPuller, error) {
+	// Extract the TLS CA certs and endpoints from the join-block
+	endpoints, err := replication.EndpointconfigFromConfigBlock(configBlock, creator.bccsp)
+	if err != nil {
+		return nil, errors.WithMessage(err, "error extracting endpoints from config block")
+	}
+
+	fc := replication.FetcherConfig{
+		Channel:      creator.channelID,
+		Signer:       creator.signer,
+		TLSCert:      creator.der.Bytes,
+		Dialer:       creator.stdDialer,
+		Endpoints:    endpoints,
+		FetchTimeout: creator.clusterConfig.ReplicationPullTimeout,
+	}
+
+	maxByzantineNodes := uint64(len(endpoints)-1) / 3
+
+	// timeout for time based shuffling
+	shuffleTimeout := shuffleTimeoutMultiplier * creator.clusterConfig.ReplicationPullTimeout
+	shuffleTimeoutThrehold := shuffleTimeoutPercentage
+
+	bf := &replication.BlockFetcher{
+		MaxPullBlockRetries: 0,
+		AttestationSourceFactory: func(c replication.FetcherConfig) replication.AttestationSource {
+			return &replication.AttestationPuller{
+				Config: fc,
+				Logger: flogging.MustGetLogger("orderer.common.cluster.attestationpuller").With("channel", creator.channelID),
+			}
+		},
+		BlockSourceFactory: func(c replication.FetcherConfig) replication.BlockSource {
+			// fill blockpuller fields from config
+			return &replication.BlockPuller{
+				VerifyBlockSequence: creator.VerifyBlockSequence,
+				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
+				RetryTimeout:        creator.clusterConfig.ReplicationRetryTimeout,
+				MaxTotalBufferBytes: creator.clusterConfig.ReplicationBufferSize,
+				MaxPullBlockRetries: uint64(creator.clusterConfig.ReplicationMaxRetries),
+				FetchTimeout:        creator.clusterConfig.ReplicationPullTimeout,
+				Endpoints:           c.Endpoints,
+				Signer:              c.Signer,
+				TLSCert:             creator.der.Bytes,
+				Channel:             c.Channel,
+				Dialer:              c.Dialer,
+				StopChannel:         stopChannel,
+			}
+		},
+		Config:                 fc,
+		Logger:                 flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
+		ShuffleTimeout:         shuffleTimeout,
+		LastShuffledAt:         time.Now(),
+		MaxByzantineNodes:      maxByzantineNodes,
+		ShuffleTimeoutThrehold: shuffleTimeoutThrehold,
+		TimeNow:                time.Now,
+	}
+
+	return bf, nil
 }
 
 // UpdateVerifierFromConfigBlock creates a new block signature verifier from the config block and updates the internal
