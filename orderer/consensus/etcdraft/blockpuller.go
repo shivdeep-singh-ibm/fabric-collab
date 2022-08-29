@@ -12,6 +12,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/bccsp"
 	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/common/replication"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/orderer/consensus"
@@ -34,12 +35,12 @@ func (lp *LedgerBlockPuller) PullBlock(seq uint64) *common.Block {
 }
 
 // EndpointconfigFromSupport extracts TLS CA certificates and endpoints from the ConsenterSupport
-func EndpointconfigFromSupport(support consensus.ConsenterSupport, bccsp bccsp.BCCSP) ([]cluster.EndpointCriteria, error) {
+func EndpointconfigFromSupport(support consensus.ConsenterSupport, bccsp bccsp.BCCSP) ([]replication.EndpointCriteria, error) {
 	lastConfigBlock, err := lastConfigBlockFromSupport(support)
 	if err != nil {
 		return nil, err
 	}
-	endpointconf, err := cluster.EndpointconfigFromConfigBlock(lastConfigBlock, bccsp)
+	endpointconf, err := replication.EndpointconfigFromConfigBlock(lastConfigBlock, bccsp)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +70,7 @@ func NewBlockPuller(support consensus.ConsenterSupport,
 		return cluster.VerifyBlocks(blocks, support)
 	}
 
-	stdDialer := &cluster.StandardDialer{
+	stdDialer := &replication.StandardDialer{
 		Config: baseDialer.Config,
 	}
 	stdDialer.Config.AsyncConnect = false
@@ -87,7 +88,7 @@ func NewBlockPuller(support consensus.ConsenterSupport,
 			string(stdDialer.Config.SecOpts.Certificate))
 	}
 
-	bp := &cluster.BlockPuller{
+	bp := &replication.BlockPuller{
 		VerifyBlockSequence: verifyBlockSequence,
 		Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID()),
 		RetryTimeout:        clusterConfig.ReplicationRetryTimeout,

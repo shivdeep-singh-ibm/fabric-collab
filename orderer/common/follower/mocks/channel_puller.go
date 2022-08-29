@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/hyperledger/fabric-protos-go/common"
-	"github.com/hyperledger/fabric/orderer/common/cluster"
+	"github.com/hyperledger/fabric/common/replication"
 	"github.com/hyperledger/fabric/orderer/common/follower"
 )
 
@@ -37,10 +37,10 @@ type ChannelPuller struct {
 	pullBlockReturnsOnCall map[int]struct {
 		result1 *common.Block
 	}
-	UpdateEndpointsStub        func([]cluster.EndpointCriteria)
+	UpdateEndpointsStub        func([]replication.EndpointCriteria)
 	updateEndpointsMutex       sync.RWMutex
 	updateEndpointsArgsForCall []struct {
-		arg1 []cluster.EndpointCriteria
+		arg1 []replication.EndpointCriteria
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
@@ -184,15 +184,15 @@ func (fake *ChannelPuller) PullBlockReturnsOnCall(i int, result1 *common.Block) 
 	}{result1}
 }
 
-func (fake *ChannelPuller) UpdateEndpoints(arg1 []cluster.EndpointCriteria) {
-	var arg1Copy []cluster.EndpointCriteria
+func (fake *ChannelPuller) UpdateEndpoints(arg1 []replication.EndpointCriteria) {
+	var arg1Copy []replication.EndpointCriteria
 	if arg1 != nil {
-		arg1Copy = make([]cluster.EndpointCriteria, len(arg1))
+		arg1Copy = make([]replication.EndpointCriteria, len(arg1))
 		copy(arg1Copy, arg1)
 	}
 	fake.updateEndpointsMutex.Lock()
 	fake.updateEndpointsArgsForCall = append(fake.updateEndpointsArgsForCall, struct {
-		arg1 []cluster.EndpointCriteria
+		arg1 []replication.EndpointCriteria
 	}{arg1Copy})
 	fake.recordInvocation("UpdateEndpoints", []interface{}{arg1Copy})
 	fake.updateEndpointsMutex.Unlock()
@@ -207,13 +207,13 @@ func (fake *ChannelPuller) UpdateEndpointsCallCount() int {
 	return len(fake.updateEndpointsArgsForCall)
 }
 
-func (fake *ChannelPuller) UpdateEndpointsCalls(stub func([]cluster.EndpointCriteria)) {
+func (fake *ChannelPuller) UpdateEndpointsCalls(stub func([]replication.EndpointCriteria)) {
 	fake.updateEndpointsMutex.Lock()
 	defer fake.updateEndpointsMutex.Unlock()
 	fake.UpdateEndpointsStub = stub
 }
 
-func (fake *ChannelPuller) UpdateEndpointsArgsForCall(i int) []cluster.EndpointCriteria {
+func (fake *ChannelPuller) UpdateEndpointsArgsForCall(i int) []replication.EndpointCriteria {
 	fake.updateEndpointsMutex.RLock()
 	defer fake.updateEndpointsMutex.RUnlock()
 	argsForCall := fake.updateEndpointsArgsForCall[i]

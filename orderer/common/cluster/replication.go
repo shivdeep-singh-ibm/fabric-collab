@@ -16,6 +16,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/bccsp"
 	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/common/replication"
 	"github.com/hyperledger/fabric/internal/pkg/comm"
 	"github.com/hyperledger/fabric/internal/pkg/identity"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
@@ -93,7 +94,7 @@ type Replicator struct {
 	SystemChannel                   string
 	ChannelLister                   ChannelLister
 	Logger                          *flogging.FabricLogger
-	Puller                          *BlockPuller
+	Puller                          *replication.BlockPuller
 	BootBlock                       *common.Block
 	AmIPartOfChannel                SelfMembershipPredicate
 	LedgerFactory                   LedgerFactory
@@ -210,7 +211,7 @@ func (r *Replicator) PullChannel(channel string) error {
 	return r.pullChannelBlocks(channel, puller, latestHeight, ledger)
 }
 
-func (r *Replicator) pullChannelBlocks(channel string, puller *BlockPuller, latestHeight uint64, ledger LedgerWriter) error {
+func (r *Replicator) pullChannelBlocks(channel string, puller *replication.BlockPuller, latestHeight uint64, ledger LedgerWriter) error {
 	nextBlockToPull := ledger.Height()
 	if nextBlockToPull == latestHeight {
 		r.Logger.Infof("Latest height found (%d) is equal to our height, skipping pulling channel %s", latestHeight, channel)
@@ -356,12 +357,12 @@ type VerifierRetriever interface {
 }
 
 // BlockPullerFromConfigBlock returns a BlockPuller that doesn't verify signatures on blocks.
-func BlockPullerFromConfigBlock(conf PullerConfig, block *common.Block, verifierRetriever VerifierRetriever, bccsp bccsp.BCCSP) (*BlockPuller, error) {
+func BlockPullerFromConfigBlock(conf PullerConfig, block *common.Block, verifierRetriever VerifierRetriever, bccsp bccsp.BCCSP) (*replication.BlockPuller, error) {
 	if block == nil {
 		return nil, errors.New("nil block")
 	}
 
-	endpoints, err := EndpointconfigFromConfigBlock(block, bccsp)
+	endpoints, err := replication.EndpointconfigFromConfigBlock(block, bccsp)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +377,7 @@ func BlockPullerFromConfigBlock(conf PullerConfig, block *common.Block, verifier
 		},
 	}
 
-	dialer := &StandardDialer{
+	dialer := &replication.StandardDialer{
 		Config: clientConf,
 	}
 
@@ -385,7 +386,7 @@ func BlockPullerFromConfigBlock(conf PullerConfig, block *common.Block, verifier
 		return nil, errors.Errorf("unable to decode TLS certificate PEM: %s", base64.StdEncoding.EncodeToString(conf.TLSCert))
 	}
 
-	return &BlockPuller{
+	return &replication.BlockPuller{
 		Logger:  flogging.MustGetLogger("orderer.common.cluster.replication").With("channel", conf.Channel),
 		Dialer:  dialer,
 		TLSCert: tlsCertAsDER.Bytes,
