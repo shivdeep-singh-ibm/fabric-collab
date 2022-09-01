@@ -21,9 +21,11 @@ import (
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/configtx"
 	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/common/replication"
+	rmocks "github.com/hyperledger/fabric/common/replication/mocks"
 	"github.com/hyperledger/fabric/internal/pkg/comm"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
-	"github.com/hyperledger/fabric/orderer/common/cluster/mocks"
+	cmocks "github.com/hyperledger/fabric/orderer/common/cluster/mocks"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/protoutil"
 	"github.com/pkg/errors"
@@ -66,10 +68,10 @@ func TestIsReplicationNeeded(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			ledgerWriter := &mocks.LedgerWriter{}
+			ledgerWriter := &cmocks.LedgerWriter{}
 			ledgerWriter.On("Height").Return(testCase.systemChannelHeight)
 
-			ledgerFactory := &mocks.LedgerFactory{}
+			ledgerFactory := &cmocks.LedgerFactory{}
 			ledgerFactory.On("GetOrCreate", "system").Return(ledgerWriter, testCase.systemChannelError)
 
 			r := cluster.Replicator{
@@ -181,11 +183,11 @@ func TestReplicateChainsFailures(t *testing.T) {
 				testCase.mutateBlocks(systemChannelBlocks)
 			}
 
-			lw := &mocks.LedgerWriter{}
+			lw := &cmocks.LedgerWriter{}
 			lw.On("Append", mock.Anything).Return(testCase.appendBlockError)
 			lw.On("Height").Return(uint64(0))
 
-			lf := &mocks.LedgerFactory{}
+			lf := &cmocks.LedgerFactory{}
 			lf.On("GetOrCreate", "system").Return(lw, testCase.ledgerFactoryError)
 			lf.On("GetOrCreate", "channelWeAreNotPartOf").Return(lw, testCase.ledgerFactoryError)
 
@@ -198,14 +200,14 @@ func TestReplicateChainsFailures(t *testing.T) {
 			// and we get an un-called for timeout.
 			bp.FetchTimeout = time.Hour
 
-			cl := &mocks.ChannelLister{}
+			cl := &cmocks.ChannelLister{}
 			cl.On("Channels").Return(testCase.channelsReturns)
 			cl.On("Close")
 
 			r := cluster.Replicator{
 				Filter: cluster.AnyChannel,
 				AmIPartOfChannel: func(configBlock *common.Block) error {
-					return cluster.ErrNotInChannel
+					return replication.ErrNotInChannel
 				},
 				Logger:        flogging.MustGetLogger("test"),
 				BootBlock:     systemChannelBlocks[21],
@@ -270,11 +272,11 @@ func TestPullChannelFailure(t *testing.T) {
 		},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
-			lw := &mocks.LedgerWriter{}
+			lw := &cmocks.LedgerWriter{}
 			lw.On("Append", mock.Anything).Return(nil)
 			lw.On("Height").Return(uint64(0))
 
-			lf := &mocks.LedgerFactory{}
+			lf := &cmocks.LedgerFactory{}
 			lf.On("GetOrCreate", "mychannel").Return(lw, nil)
 
 			osn := newClusterNode(t)
@@ -324,7 +326,7 @@ func TestPullChannelFailure(t *testing.T) {
 }
 
 func TestPullerConfigFromTopLevelConfig(t *testing.T) {
-	signer := &mocks.SignerSerializer{}
+	signer := &rmocks.SignerSerializer{}
 	expected := cluster.PullerConfig{
 		Channel:             "system",
 		MaxTotalBufferBytes: 100,
@@ -364,7 +366,7 @@ func TestReplicateChainsChannelClassificationFailure(t *testing.T) {
 	bp := newBlockPuller(dialer, osn.srv.Address())
 	bp.FetchTimeout = time.Hour
 
-	channelLister := &mocks.ChannelLister{}
+	channelLister := &cmocks.ChannelLister{}
 	channelLister.On("Channels").Return([]cluster.ChannelGenesisBlock{{ChannelName: "A"}})
 	channelLister.On("Close")
 
@@ -439,7 +441,7 @@ func TestReplicateChainsGreenPath(t *testing.T) {
 	bp.FetchTimeout = time.Hour
 	bp.MaxPullBlockRetries = 1
 
-	channelLister := &mocks.ChannelLister{}
+	channelLister := &cmocks.ChannelLister{}
 	channelLister.On("Channels").Return([]cluster.ChannelGenesisBlock{
 		{ChannelName: "E", GenesisBlock: fakeGB},
 		{ChannelName: "D", GenesisBlock: fakeGB},
@@ -470,7 +472,7 @@ func TestReplicateChainsGreenPath(t *testing.T) {
 		}
 	}
 
-	lwA := &mocks.LedgerWriter{}
+	lwA := &cmocks.LedgerWriter{}
 	lwA.On("Append", mock.Anything).Return(nil).Run(func(arg mock.Arguments) {
 		blocksCommittedToLedgerA <- arg.Get(0).(*common.Block)
 	})
@@ -478,7 +480,7 @@ func TestReplicateChainsGreenPath(t *testing.T) {
 		return uint64(len(blocksCommittedToLedgerA))
 	})
 
-	lwB := &mocks.LedgerWriter{}
+	lwB := &cmocks.LedgerWriter{}
 	lwB.On("Height").Return(func() uint64 {
 		return uint64(len(blocksCommittedToLedgerB))
 	})
@@ -486,7 +488,7 @@ func TestReplicateChainsGreenPath(t *testing.T) {
 		blocksCommittedToLedgerB <- arg.Get(0).(*common.Block)
 	})
 
-	lwC := &mocks.LedgerWriter{}
+	lwC := &cmocks.LedgerWriter{}
 	lwC.On("Height").Return(func() uint64 {
 		return uint64(len(blocksCommittedToLedgerC))
 	})
@@ -494,7 +496,7 @@ func TestReplicateChainsGreenPath(t *testing.T) {
 		blocksCommittedToLedgerC <- arg.Get(0).(*common.Block)
 	})
 
-	lwD := &mocks.LedgerWriter{}
+	lwD := &cmocks.LedgerWriter{}
 	lwD.On("Height").Return(func() uint64 {
 		return uint64(len(blocksCommittedToLedgerD))
 	})
@@ -502,7 +504,7 @@ func TestReplicateChainsGreenPath(t *testing.T) {
 		blocksCommittedToLedgerD <- arg.Get(0).(*common.Block)
 	})
 
-	lwE := &mocks.LedgerWriter{}
+	lwE := &cmocks.LedgerWriter{}
 	lwE.On("Height").Return(func() uint64 {
 		return uint64(len(blocksCommittedToLedgerE))
 	})
@@ -510,7 +512,7 @@ func TestReplicateChainsGreenPath(t *testing.T) {
 		blocksCommittedToLedgerE <- arg.Get(0).(*common.Block)
 	})
 
-	lwSystem := &mocks.LedgerWriter{}
+	lwSystem := &cmocks.LedgerWriter{}
 	lwSystem.On("Append", mock.Anything).Return(nil).Run(func(arg mock.Arguments) {
 		blocksCommittedToSystemLedger <- arg.Get(0).(*common.Block)
 	})
@@ -518,7 +520,7 @@ func TestReplicateChainsGreenPath(t *testing.T) {
 		return uint64(len(blocksCommittedToSystemLedger))
 	})
 
-	lf := &mocks.LedgerFactory{}
+	lf := &cmocks.LedgerFactory{}
 	lf.On("Close")
 	lf.On("GetOrCreate", "A").Return(lwA, nil)
 	lf.On("GetOrCreate", "B").Return(lwB, nil)
@@ -711,12 +713,12 @@ func TestParticipant(t *testing.T) {
 		{
 			name:                  "Unauthorized for the channel",
 			expectedError:         cluster.ErrForbidden.Error(),
-			heightsByEndpointsErr: cluster.ErrForbidden,
+			heightsByEndpointsErr: replication.ErrForbidden,
 		},
 		{
 			name:                  "No OSN services the channel",
 			expectedError:         cluster.ErrServiceUnavailable.Error(),
-			heightsByEndpointsErr: cluster.ErrServiceUnavailable,
+			heightsByEndpointsErr: replication.ErrServiceUnavailable,
 		},
 		{
 			name: "Pulled block has no metadata",
@@ -820,7 +822,7 @@ func TestParticipant(t *testing.T) {
 				configBlocks <- configBlock
 				return testCase.predicateReturns
 			}
-			puller := &mocks.ChainPuller{}
+			puller := &cmocks.ChainPuller{}
 			puller.On("HeightsByEndpoints").Return(testCase.heightsByEndpoints, testCase.heightsByEndpointsErr)
 			puller.On("PullBlock", testCase.latestBlockSeq).Return(testCase.latestBlock)
 			puller.On("PullBlock", testCase.latestConfigBlockSeq).Return(testCase.latestConfigBlock)
@@ -885,7 +887,7 @@ func TestBlockPullerFromConfigBlockFailures(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			verifierRetriever := &mocks.VerifierRetriever{}
+			verifierRetriever := &cmocks.VerifierRetriever{}
 			verifierRetriever.On("RetrieveVerifier", mock.Anything).Return(&cluster.NoopBlockVerifier{})
 			bp, err := cluster.BlockPullerFromConfigBlock(testCase.pullerConfig, testCase.block, verifierRetriever, cryptoProvider)
 			require.Error(t, err)
@@ -896,7 +898,7 @@ func TestBlockPullerFromConfigBlockFailures(t *testing.T) {
 }
 
 func testBlockPullerFromConfig(t *testing.T, blockVerifiers []cluster.BlockVerifier, expectedLogMsg string, iterations int) {
-	verifierRetriever := &mocks.VerifierRetriever{}
+	verifierRetriever := &cmocks.VerifierRetriever{}
 	for _, blockVerifier := range blockVerifiers {
 		verifierRetriever.On("RetrieveVerifier", mock.Anything).Return(blockVerifier).Once()
 	}
@@ -967,7 +969,7 @@ func testBlockPullerFromConfig(t *testing.T, blockVerifiers []cluster.BlockVerif
 		TLSKey:              tlsKey,
 		MaxTotalBufferBytes: 1,
 		Channel:             "mychannel",
-		Signer:              &mocks.SignerSerializer{},
+		Signer:              &rmocks.SignerSerializer{},
 		Timeout:             time.Hour,
 	}, validBlock, verifierRetriever, cryptoProvider)
 	require.NoError(t, err)
@@ -989,10 +991,10 @@ func testBlockPullerFromConfig(t *testing.T, blockVerifiers []cluster.BlockVerif
 
 func TestSkipPullingPulledChannels(t *testing.T) {
 	blockchain := createBlockChain(0, 5)
-	lw := &mocks.LedgerWriter{}
+	lw := &cmocks.LedgerWriter{}
 	lw.On("Height").Return(uint64(6))
 
-	lf := &mocks.LedgerFactory{}
+	lf := &cmocks.LedgerFactory{}
 	lf.On("GetOrCreate", "mychannel").Return(lw, nil)
 
 	osn := newClusterNode(t)
@@ -1525,7 +1527,7 @@ func TestChannels(t *testing.T) {
 				systemChain[i].Header.Number = uint64(i)
 			}
 			testCase.prepareSystemChain(systemChain)
-			puller := &mocks.ChainPuller{}
+			puller := &cmocks.ChainPuller{}
 			puller.On("Close")
 			for seq := uint64(0); int(seq) < len(systemChain)-1; seq++ {
 				puller.On("PullBlock", seq).Return(systemChain[int(seq)])
