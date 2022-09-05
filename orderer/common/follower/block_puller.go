@@ -12,6 +12,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/bccsp"
 	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/common/replication"
 	"github.com/hyperledger/fabric/internal/pkg/identity"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
@@ -24,7 +25,7 @@ import (
 type ChannelPuller interface {
 	PullBlock(seq uint64) *common.Block
 	HeightsByEndpoints() (map[string]uint64, error)
-	UpdateEndpoints(endpoints []cluster.EndpointCriteria)
+	UpdateEndpoints(endpoints []replication.EndpointCriteria)
 	Close()
 }
 
@@ -40,7 +41,7 @@ type BlockPullerCreator struct {
 	clusterConfig           localconfig.Cluster
 	signer                  identity.SignerSerializer
 	der                     *pem.Block
-	stdDialer               *cluster.StandardDialer
+	stdDialer               *replication.StandardDialer
 	ClusterVerifyBlocks     ClusterVerifyBlocksFunc // Default: cluster.VerifyBlocks, or a mock for testing
 }
 
@@ -57,7 +58,7 @@ func NewBlockPullerCreator(
 	clusterConfig localconfig.Cluster,
 	bccsp bccsp.BCCSP,
 ) (*BlockPullerCreator, error) {
-	stdDialer := &cluster.StandardDialer{
+	stdDialer := &replication.StandardDialer{
 		Config: baseDialer.Config,
 	}
 	stdDialer.Config.AsyncConnect = false
@@ -89,12 +90,12 @@ func NewBlockPullerCreator(
 // BlockPuller creates a block puller on demand, taking the endpoints from the config block.
 func (creator *BlockPullerCreator) BlockPuller(configBlock *common.Block, stopChannel chan struct{}) (ChannelPuller, error) {
 	// Extract the TLS CA certs and endpoints from the join-block
-	endpoints, err := cluster.EndpointconfigFromConfigBlock(configBlock, creator.bccsp)
+	endpoints, err := replication.EndpointconfigFromConfigBlock(configBlock, creator.bccsp)
 	if err != nil {
 		return nil, errors.WithMessage(err, "error extracting endpoints from config block")
 	}
 
-	bp := &cluster.BlockPuller{
+	bp := &replication.BlockPuller{
 		VerifyBlockSequence: creator.VerifyBlockSequence,
 		Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID),
 		RetryTimeout:        creator.clusterConfig.ReplicationRetryTimeout,
