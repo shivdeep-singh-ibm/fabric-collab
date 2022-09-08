@@ -19,6 +19,9 @@ import (
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/replication"
 	"github.com/hyperledger/fabric/common/replication/mocks"
+	"github.com/hyperledger/fabric/core/config/configtest"
+	"github.com/hyperledger/fabric/internal/configtxgen/encoder"
+	"github.com/hyperledger/fabric/internal/configtxgen/genesisconfig"
 	"github.com/hyperledger/fabric/internal/pkg/comm"
 	"github.com/hyperledger/fabric/protoutil"
 	"github.com/pkg/errors"
@@ -799,6 +802,84 @@ func TestBlockFetcherMaxRetriesExhausted(t *testing.T) {
 	bf.VerifyBlock = bf.BlockVerifierFactory(nil)
 
 	require.Equal(t, (*common.Block)(nil), bf.PullBlock(1))
+}
+
+func TestBlockFetcherInitVerifierFromGenesisBlock(t *testing.T) {
+	// In BlockFetcher, if VerifyBlock is set to nil, BlockFetcher should connect to orderers and pull
+	// genesis block and set the compute the VerifyBlock function from it.
+	// So BlockFetcher can configure itself implicitly by pulling genesis block in a bft setting
+
+	t.Parallel()
+	bf := replication.BlockFetcher{}
+
+	// Create a genesis block
+	confSys := genesisconfig.Load(genesisconfig.SampleInsecureSoloProfile, configtest.GetDevConfigDir())
+	genesisBlock := encoder.New(confSys).GenesisBlock()
+
+	// This test BlockSourceFactory creates a either a blocksources which send genesis blocks or blocksources which
+	// send block with seq number 1. `latestConfigBlock` is used as a selector to select above type of
+	// blocksources. If `latestConfigBlock` is nil, this BlockSourceFactory creates a genesisblock source
+	// if latestConfigBlock is not nil, it creates block source which sends block seq 1
+	bf.BlockSourceFactory = func(c replication.FetcherConfig, latestConfigBlock *common.Block) (replication.BlockSource, error) {
+		bs := &mocks.BlockSource{}
+		blockCreator := func(selector bool) *common.Block {
+			if selector {
+				return genesisBlock
+			}
+			return &common.Block{
+				Header:   &common.BlockHeader{Number: 1},
+				Data:     &common.BlockData{Data: [][]byte{[]byte("block 1")}},
+				Metadata: &common.BlockMetadata{},
+			}
+		}
+		bs.On("PullBlock", mock.Anything).Return(blockCreator(latestConfigBlock == nil)).After(1 * time.Second)
+		bs.On("UpdateEndpoints", mock.Anything)
+		bs.On("Close", mock.Anything)
+		return bs, nil
+	}
+
+	bf.AttestationSourceFactory = func(c replication.FetcherConfig, latestConfigBlock *common.Block) (replication.AttestationSource, error) {
+		// all attestation pullers send attestation blocks
+		return mock_attestation_puller(1, time.Second*2), nil
+	}
+
+	// Add time
+	bf.TimeNow = time.Now
+	bf.MaxRetries = 3
+	// Disable shuffle timeout
+	bf.CensorshipSuspicionThreshold = time.Duration(1 * time.Millisecond)
+	bf.PeriodicalShuffleInterval = time.Duration(1 * time.Hour)
+	bf.MaxByzantineNodes = 3
+	bf.Logger = flogging.MustGetLogger("test")
+	// set log level to debug for this test
+	flogging.ActivateSpec("debug")
+	defer flogging.ActivateSpec("info")
+	bf.FetcherConfig.FetchTimeout = time.Duration(time.Millisecond * 3)
+
+	bf.FetcherConfig.Endpoints = []replication.EndpointCriteria{
+		{Endpoint: "localhost:5100"}, {Endpoint: "localhost:5101"}, {Endpoint: "localhost:5102"}, {Endpoint: "localhost:5103"}, {Endpoint: "localhost:5104"}, {Endpoint: "localhost:5105"}, {Endpoint: "localhost:5106"}, {Endpoint: "localhost:5107"}, {Endpoint: "localhost:5108"},
+	}
+
+	bf.BlockVerifierFactory = func(block *common.Block) protoutil.BlockVerifierFunc {
+		return func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
+			// assuming blocks are valid
+			return nil
+		}
+	}
+
+	// Since `VerifyBlock=nil`, BlockFetcher should try to pull Genesis block
+	bf.VerifyBlock = nil
+	bf.LastConfigBlock = nil
+
+	block := bf.PullBlock(1)
+	// VerifyBlock should not be nil
+	require.Equal(t, false, bf.VerifyBlock == nil)
+	// LastConfigBlock should not be nil
+	require.NotEqual(t, nil, bf.LastConfigBlock)
+	// LastConfigBlock should be genesisBlock
+	require.Equal(t, uint64(0), bf.LastConfigBlock.Header.Number)
+	// PullBlock should have pulled block number 1
+	require.Equal(t, uint64(1), block.Header.Number)
 }
 
 type attestationServer struct {

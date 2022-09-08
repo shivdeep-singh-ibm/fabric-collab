@@ -17,6 +17,7 @@ import (
 	"github.com/hyperledger/fabric/internal/pkg/identity"
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
+	"github.com/hyperledger/fabric/protoutil"
 	"github.com/pkg/errors"
 )
 
@@ -102,7 +103,7 @@ func NewBlockPullerCreator(
 }
 
 // BlockPuller creates a block puller on demand, taking the endpoints from the config block.
-func (creator *BlockPullerCreator) BlockPuller(configBlock *common.Block, stopChannel chan struct{}) (ChannelPuller, error) {
+func (creator *BlockPullerCreator) BlockPuller_(configBlock *common.Block, stopChannel chan struct{}) (ChannelPuller, error) {
 	// Extract the TLS CA certs and endpoints from the join-block
 	endpoints, err := replication.EndpointconfigFromConfigBlock(configBlock, creator.bccsp)
 	if err != nil {
@@ -128,7 +129,7 @@ func (creator *BlockPullerCreator) BlockPuller(configBlock *common.Block, stopCh
 }
 
 // BlockFetcher creates a block fetcher on demand, taking the endpoints from the config block.
-func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopChannel chan struct{}) (ChannelPuller, error) {
+func (creator *BlockPullerCreator) BlockPuller(configBlock *common.Block, stopChannel chan struct{}) (ChannelPuller, error) {
 	// Extract the TLS CA certs and endpoints from the join-block
 	endpoints, err := replication.EndpointconfigFromConfigBlock(configBlock, creator.bccsp)
 	if err != nil {
@@ -145,6 +146,29 @@ func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopC
 		MaxRetries:                   uint64(creator.clusterConfig.ReplicationMaxRetries),
 	}
 
+	bf_logger := flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID)
+
+	// modify the verifier builder with middleware to skip verifying the genesis block
+	// in the follower chain
+	modifiedVerifierBuilder := func(blockVerifierFunction protoutil.BlockVerifierFunc) protoutil.BlockVerifierFunc {
+		return protoutil.BlockVerifierFunc(
+			func(header *common.BlockHeader, metadata *common.BlockMetadata) error {
+				// don't verify the genesis block
+				if header.Number == 0 {
+					bf_logger.Debugf("Not verfying genesis block for follower chain")
+					return nil
+				}
+
+				return blockVerifierFunction(header, metadata)
+			})
+	}
+
+	// wrap the verifier factory to stop verifying genesis block
+	verifierFactory := func(block *common.Block) protoutil.BlockVerifierFunc {
+		vf := cluster.BlockVerifierBuilder(creator.bccsp)
+		return modifiedVerifierBuilder(vf(block))
+	}
+
 	// To tolerate byzantine behaviour of `f` faulty nodes, we need atleast of `3f + 1` nodes.
 	// check for bft enable and update `MaxByzantineNodes`
 	// accordingly.
@@ -153,18 +177,21 @@ func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopC
 		return nil, err
 	}
 
+	var verifyBlockFunc protoutil.BlockVerifierFunc
 	if bftEnabled && f > 0 {
 		fc.MaxByzantineNodes = f
+		// setting verifyBlockFunc, will make BlockFetcher pull genesis block in a bft setting and
+		// intialize the VerifyBlock function
+		verifyBlockFunc = nil
+	} else {
+		verifyBlockFunc = verifierFactory(configBlock)
 	}
-
-	verifierFactory := cluster.BlockVerifierBuilder(creator.bccsp)
-	bf_logger := flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID)
 
 	bf := &replication.BlockFetcher{
 		FetcherConfig:        fc,
 		LastConfigBlock:      configBlock,
 		BlockVerifierFactory: verifierFactory,
-		VerifyBlock:          verifierFactory(configBlock),
+		VerifyBlock:          verifyBlockFunc,
 		AttestationSourceFactory: func(c replication.FetcherConfig, latestConfigBlock *common.Block) (replication.AttestationSource, error) {
 			fc, err := replication.UpdateFetcherConfigFromConfigBlock(c, latestConfigBlock)
 			bf_logger.Errorf("Could not update FetcherConfig fom Config Block: %v", err)
