@@ -254,7 +254,7 @@ func (c *Consenter) HandleChain(support consensus.ConsenterSupport, metadata *co
 		rpc,
 		c.BCCSP,
 		func() (BlockPuller, error) {
-			return NewBlockPuller(support, c.Dialer, c.OrdererConfig.General.Cluster, c.BCCSP)
+			return NewBlockFetcher(support, c.Dialer, c.OrdererConfig.General.Cluster, c.BCCSP)
 		},
 		haltCallback,
 		nil,
