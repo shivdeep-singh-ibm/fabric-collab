@@ -8,6 +8,7 @@ package etcdraft
 
 import (
 	"encoding/pem"
+	"time"
 
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/bccsp"
@@ -17,6 +18,16 @@ import (
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/orderer/consensus"
 	"github.com/pkg/errors"
+)
+
+const (
+	// compute endpoint shuffle timeout from FetchTimeout
+	// endpoint shuffle timeout should be shuffleTimeoutMultiplier times FetchTimeout
+	shuffleTimeoutMultiplier = 10
+	// timeout expressed as a percentage of FetchtimeOut
+	// if PullBlock returns before (shuffleTimeoutPercentage% of FetchTimeOut of blockfetcher)
+	// the source is shuffled.
+	shuffleTimeoutPercentage = int64(50)
 )
 
 // LedgerBlockPuller pulls blocks upon demand, or fetches them from the ledger
@@ -106,5 +117,98 @@ func NewBlockPuller(support consensus.ConsenterSupport,
 		Height:         support.Height,
 		BlockRetriever: support,
 		BlockPuller:    bp,
+	}, nil
+}
+
+// NewBlockFetcher creates a new block fetcher
+func NewBlockFetcher(support consensus.ConsenterSupport,
+	baseDialer *cluster.PredicateDialer,
+	clusterConfig localconfig.Cluster,
+	bccsp bccsp.BCCSP,
+) (BlockPuller, error) {
+	verifyBlockSequence := func(blocks []*common.Block, _ string) error {
+		return cluster.VerifyBlocks(blocks, support)
+	}
+
+	stdDialer := &replication.StandardDialer{
+		Config: baseDialer.Config,
+	}
+	stdDialer.Config.AsyncConnect = false
+	stdDialer.Config.SecOpts.VerifyCertificate = nil
+
+	// Extract the TLS CA certs and endpoints from the configuration,
+	endpoints, err := EndpointconfigFromSupport(support, bccsp)
+	if err != nil {
+		return nil, err
+	}
+
+	der, _ := pem.Decode(stdDialer.Config.SecOpts.Certificate)
+	if der == nil {
+		return nil, errors.Errorf("client certificate isn't in PEM format: %v",
+			string(stdDialer.Config.SecOpts.Certificate))
+	}
+
+	// TODO: change this to use the new mapping of consenters in the channel config
+
+	fc := replication.FetcherConfig{
+		Channel:                      support.ChannelID(),
+		TLSCert:                      der.Bytes,
+		Endpoints:                    endpoints,
+		FetchTimeout:                 clusterConfig.ReplicationPullTimeout,
+		CensorshipSuspicionThreshold: time.Duration((int64(clusterConfig.ReplicationPullTimeout) * shuffleTimeoutPercentage / 100)),
+		PeriodicalShuffleInterval:    shuffleTimeoutMultiplier * clusterConfig.ReplicationPullTimeout,
+		MaxRetries:                   uint64(clusterConfig.ReplicationMaxRetries),
+	}
+
+	bf_logger := flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", support.ChannelID())
+
+	lastConfigBlock, err := lastConfigBlockFromSupport(support)
+	if err != nil {
+		return nil, err
+	}
+
+	verifierFactory := cluster.BlockVerifierBuilder(bccsp)
+
+	bf := replication.BlockFetcher{
+		FetcherConfig:        fc,
+		LastConfigBlock:      lastConfigBlock,
+		BlockVerifierFactory: verifierFactory,
+		VerifyBlock:          verifierFactory(lastConfigBlock),
+		AttestationSourceFactory: func(c replication.FetcherConfig, latestConfigBlock *common.Block) (replication.AttestationSource, error) {
+			fc, err := replication.UpdateFetcherConfigFromConfigBlock(c, latestConfigBlock)
+			bf_logger.Errorf("Could not update FetcherConfig fom Config Block: %v", err)
+			return &replication.AttestationPuller{
+				Config: fc,
+				Logger: flogging.MustGetLogger("orderer.common.cluster.attestationpuller").With("channel", fc.Channel),
+			}, err
+		},
+		BlockSourceFactory: func(c replication.FetcherConfig, latestConfigBlock *common.Block) (replication.BlockSource, error) {
+			// update FetcherConfig from latestConfigBlock
+			fc, err := replication.UpdateFetcherConfigFromConfigBlock(c, latestConfigBlock)
+			bf_logger.Errorf("Could not update FetcherConfig fom Config Block: %v", err)
+			return &replication.BlockPuller{
+				VerifyBlockSequence: verifyBlockSequence,
+				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", fc.Channel),
+				RetryTimeout:        clusterConfig.ReplicationRetryTimeout,
+				MaxTotalBufferBytes: clusterConfig.ReplicationBufferSize,
+				FetchTimeout:        clusterConfig.ReplicationPullTimeout,
+				Endpoints:           fc.Endpoints,
+				Signer:              support,
+				TLSCert:             der.Bytes,
+				Channel:             fc.Channel,
+				Dialer:              stdDialer,
+				StopChannel:         make(chan struct{}),
+			}, err
+		},
+		Logger:  bf_logger,
+		Signer:  support,
+		Dialer:  stdDialer,
+		TimeNow: time.Now,
+	}
+
+	return &LedgerBlockPuller{
+		Height:         support.Height,
+		BlockRetriever: support,
+		BlockPuller:    &bf,
 	}, nil
 }

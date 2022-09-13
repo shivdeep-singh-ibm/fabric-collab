@@ -8,6 +8,7 @@ package follower
 
 import (
 	"encoding/pem"
+	"time"
 
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/bccsp"
@@ -17,6 +18,19 @@ import (
 	"github.com/hyperledger/fabric/orderer/common/cluster"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/pkg/errors"
+)
+
+// TODO: keep these constants at one place tp
+// to prevent code duplication. These would be needed in the
+// consensus blockpuller.
+const (
+	// compute endpoint shuffle timeout from FetchTimeout
+	// endpoint shuffle timeout should be shuffleTimeoutMultiplier times FetchTimeout
+	shuffleTimeoutMultiplier = 10
+	// timeout expressed as a percentage of FetchtimeOut
+	// if PullBlock returns before (shuffleTimeoutPercentage% of FetchTimeOut of blockfetcher)
+	// the source is shuffled.
+	shuffleTimeoutPercentage = int64(50)
 )
 
 //go:generate counterfeiter -o mocks/channel_puller.go -fake-name ChannelPuller . ChannelPuller
@@ -111,6 +125,81 @@ func (creator *BlockPullerCreator) BlockPuller(configBlock *common.Block, stopCh
 	}
 
 	return bp, nil
+}
+
+// BlockFetcher creates a block fetcher on demand, taking the endpoints from the config block.
+func (creator *BlockPullerCreator) BlockFetcher(configBlock *common.Block, stopChannel chan struct{}) (ChannelPuller, error) {
+	// Extract the TLS CA certs and endpoints from the join-block
+	endpoints, err := replication.EndpointconfigFromConfigBlock(configBlock, creator.bccsp)
+	if err != nil {
+		return nil, errors.WithMessage(err, "error extracting endpoints from config block")
+	}
+
+	fc := replication.FetcherConfig{
+		Channel:                      creator.channelID,
+		TLSCert:                      creator.der.Bytes,
+		Endpoints:                    endpoints,
+		FetchTimeout:                 creator.clusterConfig.ReplicationPullTimeout,
+		CensorshipSuspicionThreshold: time.Duration((int64(creator.clusterConfig.ReplicationPullTimeout) * shuffleTimeoutPercentage / 100)),
+		PeriodicalShuffleInterval:    shuffleTimeoutMultiplier * creator.clusterConfig.ReplicationPullTimeout,
+		MaxRetries:                   uint64(creator.clusterConfig.ReplicationMaxRetries),
+	}
+
+	// To tolerate byzantine behaviour of `f` faulty nodes, we need atleast of `3f + 1` nodes.
+	// check for bft enable and update `MaxByzantineNodes`
+	// accordingly.
+	bftEnabled, f, err := replication.BFTEnabledInConfig(configBlock, creator.bccsp)
+	if err != nil {
+		return nil, err
+	}
+
+	if bftEnabled && f > 0 {
+		fc.MaxByzantineNodes = f
+	}
+
+	verifierFactory := cluster.BlockVerifierBuilder(creator.bccsp)
+	bf_logger := flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", creator.channelID)
+
+	bf := &replication.BlockFetcher{
+		FetcherConfig:        fc,
+		LastConfigBlock:      configBlock,
+		BlockVerifierFactory: verifierFactory,
+		VerifyBlock:          verifierFactory(configBlock),
+		AttestationSourceFactory: func(c replication.FetcherConfig, latestConfigBlock *common.Block) (replication.AttestationSource, error) {
+			fc, err := replication.UpdateFetcherConfigFromConfigBlock(c, latestConfigBlock)
+			bf_logger.Errorf("Could not update FetcherConfig fom Config Block: %v", err)
+			return &replication.AttestationPuller{
+				Logger: flogging.MustGetLogger("orderer.common.cluster.attestationpuller").With("channel", creator.channelID),
+				Signer: creator.signer,
+				Dialer: creator.stdDialer,
+				Config: fc,
+			}, err
+		},
+		BlockSourceFactory: func(c replication.FetcherConfig, latestConfigBlock *common.Block) (replication.BlockSource, error) {
+			fc, err := replication.UpdateFetcherConfigFromConfigBlock(c, latestConfigBlock)
+			bf_logger.Errorf("Could not update FetcherConfig from Config Block: %v", err)
+			return &replication.BlockPuller{
+				MaxPullBlockRetries: uint64(creator.clusterConfig.ReplicationMaxRetries),
+				MaxTotalBufferBytes: creator.clusterConfig.ReplicationBufferSize,
+				Signer:              creator.signer,
+				TLSCert:             creator.der.Bytes,
+				Channel:             fc.Channel,
+				FetchTimeout:        creator.clusterConfig.ReplicationPullTimeout,
+				RetryTimeout:        creator.clusterConfig.ReplicationRetryTimeout,
+				Logger:              flogging.MustGetLogger("orderer.common.cluster.puller").With("channel", fc.Channel),
+				Dialer:              creator.stdDialer,
+				VerifyBlockSequence: creator.VerifyBlockSequence,
+				Endpoints:           fc.Endpoints,
+				StopChannel:         stopChannel,
+			}, err
+		},
+		Logger:  bf_logger,
+		TimeNow: time.Now,
+		Signer:  creator.signer,
+		Dialer:  creator.stdDialer,
+	}
+
+	return bf, nil
 }
 
 // UpdateVerifierFromConfigBlock creates a new block signature verifier from the config block and updates the internal
