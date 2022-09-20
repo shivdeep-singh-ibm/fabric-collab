@@ -9,6 +9,7 @@ package replication
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"sync"
@@ -295,13 +296,14 @@ type BlockFetcher struct {
 	Signer                   identity.SignerSerializer
 	Dialer                   Dialer
 	// State
-	currentEndpoint    EndpointCriteria
-	lastShuffledAt     time.Time
-	setupExecuted      bool
-	blockSourceOp      BlockSourceOp
-	shuffleIndex       int
-	currentBlockSource BlockSource
-	suspects           suspectSet // a set of bft suspected nodes.
+	currentEndpoint         EndpointCriteria
+	lastShuffledAt          time.Time
+	setupExecuted           bool
+	blockSourceOp           BlockSourceOp
+	shuffleIndex            int
+	currentBlockSource      BlockSource
+	suspects                suspectSet // a set of bft suspected nodes.
+	setupVerifierInProgress bool
 }
 
 func (bf *BlockFetcher) getBlockSource() (BlockSource, error) {
@@ -475,6 +477,85 @@ func (bf *BlockFetcher) setup() {
 	}()
 
 	bf.suspects = suspectSet{max: bf.FetcherConfig.MaxByzantineNodes}
+
+	/* If the `VerifyBlock` is not set, BlockFetcher tries to pull genesis block and intialize the `VerifyBlock` function
+	based on it. It will try to pull genesis block(block number 0) till it suceeds.*/
+
+	if bf.VerifyBlock == nil {
+		bf.Logger.Debugf("VerifyBlock Function is not set.")
+		bf.setupVerifierInProgress = true
+		for bf.setupVerifierInProgress {
+			// keep polling till we get a genesis block.
+			ok := bf.setUpVerifierFromGenesisBlock()
+			bf.Logger.Debugf("Try to pull genesis block %v", ok)
+			if ok {
+				bf.Logger.Debugf("Successfully pulled a genesis block.")
+				bf.setupVerifierInProgress = false
+			}
+		}
+	}
+}
+
+// setUpVerifierFromGenesisBlock connects to orderers and tries to pull genesis block from f+1 distinct
+// orderers and sets up verifier
+func (bf *BlockFetcher) setUpVerifierFromGenesisBlock() bool {
+	candidates := bf.blockSourceCandidates()
+
+	var wg sync.WaitGroup
+	wg.Add(len(candidates))
+	var lock sync.Mutex
+	var blocks []*common.Block
+
+	for i := 0; i < len(candidates); i++ {
+		go func(candidate EndpointCriteria) {
+			defer wg.Done()
+			config := bf.FetcherConfig
+			config.Endpoints = []EndpointCriteria{candidate}
+			blockSource, err := bf.BlockSourceFactory(config, bf.LastConfigBlock)
+			if err != nil {
+				bf.Logger.Errorf("Failed to create block source: %v", err)
+				return
+			}
+			defer blockSource.Close()
+
+			block := blockSource.PullBlock(0)
+			// verify data hash on the block
+			if !bytes.Equal(protoutil.BlockDataHash(block.Data), block.Header.DataHash) {
+				bf.Logger.Warnf("Block data hash mismatch on block %d", block.Header.Number)
+				return
+			}
+			lock.Lock()
+			blocks = append(blocks, block)
+			lock.Unlock()
+		}(candidates[i])
+	}
+	wg.Wait()
+
+	histogram := make(map[string]int) // maps block hashes to number of nodes that returned them.
+	var genesisBlock *common.Block
+	// Search for a candidate with f+1 votes
+	for _, genesisBlockCandidate := range blocks {
+		currentBlockHash := hex.EncodeToString(protoutil.BlockHeaderHash(genesisBlockCandidate.Header))
+		histogram[currentBlockHash]++
+		votes := histogram[currentBlockHash]
+		if votes >= bf.MaxByzantineNodes+1 && genesisBlock == nil {
+			bf.Logger.Debugf("%d votes for block with hash %s, genesis block found", votes, currentBlockHash)
+			genesisBlock = genesisBlockCandidate
+			break
+		}
+	}
+
+	if genesisBlock == nil {
+		bf.Logger.Errorf("Failed to get at least %d votes for any genesis block among %v", bf.MaxByzantineNodes+1, candidates)
+		return false
+	}
+
+	// Setup BlockVerifierFactory and LastConfigBlock from genesisBlock
+	bf.VerifyBlock = bf.BlockVerifierFactory(genesisBlock)
+	if bf.LastConfigBlock == nil {
+		bf.LastConfigBlock = genesisBlock
+	}
+	return true
 }
 
 // PullBlock pulls blocks from orderers in spite of block censorship.
