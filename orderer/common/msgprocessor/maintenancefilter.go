@@ -47,6 +47,8 @@ func NewMaintenanceFilter(support MaintenanceFilterSupport, bccsp bccsp.BCCSP) *
 	}
 	mf.permittedTargetConsensusTypes["etcdraft"] = true
 	mf.permittedTargetConsensusTypes["solo"] = true
+	mf.permittedTargetConsensusTypes["smartbft"] = true
+
 	return mf
 }
 

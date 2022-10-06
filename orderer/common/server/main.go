@@ -49,6 +49,7 @@ import (
 	"github.com/hyperledger/fabric/orderer/common/onboarding"
 	"github.com/hyperledger/fabric/orderer/consensus"
 	"github.com/hyperledger/fabric/orderer/consensus/etcdraft"
+	"github.com/hyperledger/fabric/orderer/consensus/smartbft"
 	"github.com/hyperledger/fabric/orderer/consensus/solo"
 	"github.com/hyperledger/fabric/protoutil"
 	"go.uber.org/zap/zapcore"
@@ -816,6 +817,7 @@ func initializeMultichannelRegistrar(
 	}
 
 	consenters["solo"] = solo.New()
+	consenters["smartbft"] = smartbft.New()
 
 	registrar.Initialize(consenters)
 	return registrar

@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package raft
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -21,6 +22,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go/common"
 	protosorderer "github.com/hyperledger/fabric-protos-go/orderer"
 	protosraft "github.com/hyperledger/fabric-protos-go/orderer/etcdraft"
+	"github.com/hyperledger/fabric/integration/channelparticipation"
 	"github.com/hyperledger/fabric/integration/nwo"
 	"github.com/hyperledger/fabric/integration/nwo/commands"
 	"github.com/hyperledger/fabric/integration/ordererclient"
@@ -868,4 +870,307 @@ func createDeliverEnvelope(n *nwo.Network, signer *nwo.SigningIdentity, blkNum u
 	Expect(err).NotTo(HaveOccurred())
 
 	return env
+}
+
+var _ = Describe("Raft2SmartBFTMigration", func() {
+	var (
+		testDir          string
+		client           *docker.Client
+		network          *nwo.Network
+		ordererProcesses []ifrit.Process
+		ordererRunners   []*ginkgomon.Runner
+	)
+
+	BeforeEach(func() {
+		var err error
+		testDir, err = ioutil.TempDir("", "raft2smartbft-migration")
+		Expect(err).NotTo(HaveOccurred())
+
+		client, err = docker.NewClientFromEnv()
+		Expect(err).NotTo(HaveOccurred())
+
+		ordererProcesses = []ifrit.Process{}
+		ordererRunners = []*ginkgomon.Runner{}
+	})
+
+	AfterEach(func() {
+		if network != nil {
+			network.Cleanup()
+		}
+		os.RemoveAll(testDir)
+	})
+
+	/*
+		restartOrderer := func(o *nwo.Orderer, index int) {
+			ordererProcesses[index].Signal(syscall.SIGKILL)
+			Eventually(ordererProcesses[index].Wait(), network.EventuallyTimeout).Should(Receive(MatchError("exit status 137")))
+			ordererRunner := network.OrdererRunner(o)
+			ordererProcess := ifrit.Invoke(ordererRunner)
+			Eventually(ordererProcess.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			ordererProcesses[index] = ordererProcess
+			ordererRunners[index] = ordererRunner
+		}
+	*/
+
+	Describe("Raft to SmartBFT migration", func() {
+		startOrderer := func(o *nwo.Orderer) {
+			ordererRunner := network.OrdererRunner(o)
+			ordererProcess := ifrit.Invoke(ordererRunner)
+			Eventually(ordererProcess.Ready(), network.EventuallyTimeout).Should(BeClosed())
+			Eventually(ordererRunner.Err(), network.EventuallyTimeout).Should(gbytes.Say("Registrar initializing without a system channel"))
+			ordererProcesses = append(ordererProcesses, ordererProcess)
+			ordererRunners = append(ordererRunners, ordererRunner)
+		}
+		BeforeEach(func() {
+			nodeConfig := multiNodeEtcdRaftTwoChannels()
+			// nodeConfig has 3 orderers, add 4th orderer
+			nodeConfig.Orderers = append(nodeConfig.Orderers, &nwo.Orderer{Name: "orderer4", Organization: "OrdererOrg"})
+			network = nwo.New(nodeConfig, testDir, client, StartPort(), components)
+			network.Consensus.ChannelParticipationEnabled = true
+			network.Consensus.BootstrapMethod = "none"
+			network.GenerateConfigTree()
+			network.Bootstrap()
+		})
+		Describe("4-node raft setup", func() {
+			var (
+				orderer1, orderer2, orderer3, orderer4 *nwo.Orderer
+				orderers                               []*nwo.Orderer
+				peer                                   *nwo.Peer
+				channel                                string
+			)
+
+			BeforeEach(func() {
+				// create a channel with 3 orderers as consenters
+				orderer1 = network.Orderer("orderer1")
+				orderer2 = network.Orderer("orderer2")
+				orderer3 = network.Orderer("orderer3")
+				orderer4 = network.Orderer("orderer4")
+				By(fmt.Sprintf("orderer4 %p", orderer4))
+
+				orderers = []*nwo.Orderer{orderer1, orderer2, orderer3, orderer4}
+				consenters := []*nwo.Orderer{orderer1, orderer2, orderer3, orderer4}
+				peer = network.Peer("Org1", "peer0")
+				channel = "mychannel"
+				channelURL := fmt.Sprintf("/participation/v1/channels/%s", channel)
+
+				// starting orderers
+				for _, o := range orderers {
+					startOrderer(o)
+					cl := channelparticipation.List(network, o)
+					Expect(cl).To(Equal(channelparticipation.ChannelList{}))
+				}
+
+				genesisBlock := applicationChannelGenesisBlock(network, consenters, []*nwo.Peer{peer}, channel)
+				expectedChannelInfoPT := channelparticipation.ChannelInfo{
+					Name:              channel,
+					URL:               channelURL,
+					Status:            "active",
+					ConsensusRelation: "consenter",
+					Height:            1,
+				}
+
+				for _, o := range consenters {
+					By("joining " + o.Name + " to channel as a consenter")
+					channelparticipation.Join(network, o, channel, genesisBlock, expectedChannelInfoPT)
+					channelInfo := channelparticipation.ListOne(network, o, channel)
+					Expect(channelInfo).To(Equal(expectedChannelInfoPT))
+				}
+
+				for i, o := range orderers {
+					submitPeerTxn(o, peer, network, channelparticipation.ChannelInfo{
+						Name:              channel,
+						URL:               channelURL,
+						Status:            "active",
+						ConsensusRelation: "consenter",
+						Height:            uint64(1 + i), // since genesis block is already created.
+					})
+				}
+			})
+
+			AfterEach(func() {
+				for _, ordererProcess := range ordererProcesses {
+					ordererProcess.Signal(syscall.SIGTERM)
+					Eventually(ordererProcess.Wait(), network.EventuallyTimeout).Should(Receive())
+				}
+			})
+
+			Context("when updrading from raft to smartbft", func() {
+				var oldConsensusType, newConsensusType string
+
+				It("1) executes raft2smartbft green path", func() {
+					oldConsensusType = "etcdraft"
+					newConsensusType = "smartbft"
+
+					prepareConsensusTransition := func(o *nwo.Orderer,
+						oldType string,
+						newType string,
+						oldState protosorderer.ConsensusType_State,
+						newState protosorderer.ConsensusType_State,
+						oldMetaData []byte, // if unknown, can be set to nil while setting newMetadata to non-nil value
+						newMetaData []byte,
+					) (*common.Config, *common.Config) {
+						current := nwo.GetConfig(network, peer, o, channel)
+						updated := proto.Clone(current).(*common.Config)
+						consensusTypeValue := extractOrdererConsensusType(current)
+						validateConsensusTypeValue(consensusTypeValue, oldType, oldState)
+
+						consensusTypeValue.Type = newType
+						consensusTypeValue.State = newState
+
+						// change metadata if oldMetadata and newMetaData are different
+						if !bytes.Equal(oldMetaData, newMetaData) {
+							consensusTypeValue.Metadata = newMetaData
+						}
+
+						updated.ChannelGroup.Groups["Orderer"].Values["ConsensusType"] = &common.ConfigValue{
+							ModPolicy: "Admins",
+							Value:     protoutil.MarshalOrPanic(consensusTypeValue),
+						}
+
+						return current, updated
+					}
+
+					By("1) Config update on standard channel, State=MAINTENANCE, enter maintenance-mode")
+
+					current, updated := prepareConsensusTransition(orderer1,
+						oldConsensusType,
+						oldConsensusType,
+						protosorderer.ConsensusType_STATE_NORMAL,
+						protosorderer.ConsensusType_STATE_MAINTENANCE,
+						[]byte{},
+						[]byte{})
+
+					nwo.UpdateOrdererConfig(network,
+						orderer1,
+						channel,
+						current,
+						updated,
+						peer,
+						orderer1, orderer2, orderer3)
+
+					By("1) Verify: standard channel config changed")
+
+					std1EntryBlockNum := nwo.CurrentConfigBlockNumber(network, peer, orderer1, channel)
+					Expect(std1EntryBlockNum).ToNot(Equal(0))
+					config := nwo.GetConfig(network, peer, orderer1, channel)
+					consensusTypeValue := extractOrdererConsensusType(config)
+					validateConsensusTypeValue(consensusTypeValue, oldConsensusType, protosorderer.ConsensusType_STATE_MAINTENANCE)
+
+					By("1) Verify: Normal TX's on standard channel are blocked")
+
+					for _, o := range orderers {
+						assertTxFailed(network, o, channel)
+					}
+
+					By("2) Config update to migrate to smartbft")
+					current, updated = prepareConsensusTransition(orderer1,
+						oldConsensusType,
+						newConsensusType,
+						protosorderer.ConsensusType_STATE_MAINTENANCE,
+						protosorderer.ConsensusType_STATE_MAINTENANCE,
+						[]byte{},
+						[]byte{})
+
+					nwo.UpdateOrdererConfig(network,
+						orderer1,
+						channel,
+						current,
+						updated,
+						peer,
+						orderer1, orderer2, orderer3)
+
+					By("2) Verify: Normal TX's on standard channel are blocked")
+
+					for _, o := range orderers {
+						assertTxFailed(network, o, channel)
+					}
+
+					std2EntryBlockNum := nwo.CurrentConfigBlockNumber(network, peer, orderer1, channel)
+					By("3) Verify: everse migrating to etcdraft on standard channel is allowed")
+
+					current, updated = prepareConsensusTransition(orderer1,
+						newConsensusType,
+						oldConsensusType,
+						protosorderer.ConsensusType_STATE_MAINTENANCE,
+						protosorderer.ConsensusType_STATE_MAINTENANCE,
+						[]byte{},
+						[]byte{})
+
+					nwo.UpdateOrdererConfig(network,
+						orderer1,
+						channel,
+						current,
+						updated,
+						peer,
+						orderer1, orderer2, orderer3)
+
+					By("3) Verify: standard channel config changed")
+					std2BlockNum := nwo.CurrentConfigBlockNumber(network, peer, orderer1, channel)
+					Expect(std2BlockNum).To(Equal(std2EntryBlockNum + 1))
+
+					By("3) Verify: delivery request from peer is blocked")
+					err := checkPeerDeliverRequest(orderer1, peer, network, channel)
+					Expect(err).To(MatchError(errors.New("FORBIDDEN")))
+
+					By("4) Give consensus request to migrate to smartbft")
+					current, updated = prepareConsensusTransition(orderer1,
+						oldConsensusType,
+						newConsensusType,
+						protosorderer.ConsensusType_STATE_MAINTENANCE,
+						protosorderer.ConsensusType_STATE_MAINTENANCE,
+						[]byte{},
+						[]byte{})
+
+					nwo.UpdateOrdererConfig(network,
+						orderer1,
+						channel,
+						current,
+						updated,
+						peer,
+						orderer1, orderer2, orderer3)
+
+					std2BlockNum = nwo.CurrentConfigBlockNumber(network, peer, orderer1, channel)
+					Expect(std2BlockNum).To(Equal(std2EntryBlockNum + 2))
+
+					By("4) Update consensus metadata in smartbft to empty")
+					/*
+						// TODO: Setting metadata empty causesa panic
+						// it tries to interpret it as a transaction trying to remove
+						// all consenters at once
+						raftMetadata := prepareRaftMetadata(network)
+						smartbftmetaData := []byte{}
+
+						current, updated = prepareConsensusTransition(orderer1,
+							newConsensusType,
+							newConsensusType,
+							protosorderer.ConsensusType_STATE_MAINTENANCE,
+							protosorderer.ConsensusType_STATE_MAINTENANCE,
+							raftMetadata,
+							smartbftmetaData)
+
+						nwo.UpdateOrdererConfig(network,
+							orderer1,
+							channel,
+							current,
+							updated,
+							peer,
+							orderer1, orderer2, orderer3)
+					*/
+					By("Raft node goes to standby mode on all nodes")
+
+					By("Restart All nodes")
+					/*
+						for i, o := range orderers {
+							restartOrderer(o, i)
+						}
+					*/
+				})
+			})
+		})
+	})
+})
+
+// TODO: Can this be moved to nwo package?
+func raft2smartbftMultiChannel() *nwo.Config {
+	return nwo.MultiNodeEtcdRaft()
 }
