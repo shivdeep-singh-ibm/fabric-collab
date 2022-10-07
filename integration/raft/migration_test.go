@@ -945,7 +945,6 @@ var _ = Describe("Raft2SmartBFTMigration", func() {
 				orderer2 = network.Orderer("orderer2")
 				orderer3 = network.Orderer("orderer3")
 				orderer4 = network.Orderer("orderer4")
-				By(fmt.Sprintf("orderer4 %p", orderer4))
 
 				orderers = []*nwo.Orderer{orderer1, orderer2, orderer3, orderer4}
 				consenters := []*nwo.Orderer{orderer1, orderer2, orderer3, orderer4}
@@ -1169,8 +1168,3 @@ var _ = Describe("Raft2SmartBFTMigration", func() {
 		})
 	})
 })
-
-// TODO: Can this be moved to nwo package?
-func raft2smartbftMultiChannel() *nwo.Config {
-	return nwo.MultiNodeEtcdRaft()
-}
