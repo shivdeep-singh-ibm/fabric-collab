@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package smartbft
 
 import (
-	cb "github.com/hyperledger/fabric-protos-go/common"
+	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/consensus"
 )
@@ -15,6 +15,13 @@ import (
 var logger = flogging.MustGetLogger("orderer.consensus.solo")
 
 type consenter struct{}
+
+func (c consenter) IsChannelMember(joinBlock *common.Block) (bool, error) {
+	return true, nil
+}
+
+func (c consenter) RemoveInactiveChainRegistry() {
+}
 
 type chain struct {
 	support consensus.ConsenterSupport
@@ -25,7 +32,7 @@ func New() consensus.Consenter {
 	return &consenter{}
 }
 
-func (solo *consenter) HandleChain(support consensus.ConsenterSupport, metadata *cb.Metadata) (consensus.Chain, error) {
+func (solo *consenter) HandleChain(support consensus.ConsenterSupport, metadata *common.Metadata) (consensus.Chain, error) {
 	logger.Warningf("dummy smartbft chain.")
 	return newChain(support), nil
 }
@@ -47,12 +54,12 @@ func (ch *chain) WaitReady() error {
 }
 
 // Order accepts normal messages for ordering
-func (ch *chain) Order(env *cb.Envelope, configSeq uint64) error {
+func (ch *chain) Order(env *common.Envelope, configSeq uint64) error {
 	return nil
 }
 
 // Configure accepts configuration update messages for ordering
-func (ch *chain) Configure(config *cb.Envelope, configSeq uint64) error {
+func (ch *chain) Configure(config *common.Envelope, configSeq uint64) error {
 	return nil
 }
 

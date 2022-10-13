@@ -888,9 +888,11 @@ func (c *Chain) writeBlock(block *common.Block, index uint64) {
 
 // Orders the envelope in the `msg` content. SubmitRequest.
 // Returns
-//   -- batches [][]*common.Envelope; the batches cut,
-//   -- pending bool; if there are envelopes pending to be ordered,
-//   -- err error; the error encountered, if any.
+//
+//	-- batches [][]*common.Envelope; the batches cut,
+//	-- pending bool; if there are envelopes pending to be ordered,
+//	-- err error; the error encountered, if any.
+//
 // It takes care of config messages as well as the revalidation of messages if the config sequence has advanced.
 func (c *Chain) ordered(msg *orderer.SubmitRequest) (batches [][]*common.Envelope, pending bool, err error) {
 	seq := c.support.Sequence()
@@ -1235,6 +1237,49 @@ func pemToDER(pemBytes []byte, id uint64, certType string, logger *flogging.Fabr
 	return bl.Bytes, nil
 }
 
+func (c *Chain) configBundleFromBlock(block *common.Block) (*channelconfig.Bundle, bool) {
+	env := &common.Envelope{}
+	if err := proto.Unmarshal(block.Data.Data[0], env); err != nil {
+		return nil, false
+	}
+
+	bundle, err := channelconfig.NewBundleFromEnvelope(env, c.CryptoProvider)
+	if err != nil {
+		return nil, false
+	}
+
+	if err != nil {
+		return nil, false
+	}
+	return bundle, true
+}
+
+// isConsensusUpgrade returns true if config block has a consensustype upgrade to smartbft with empty metadata.
+// in all other cases it returns false
+func (c *Chain) isConsensusUpgrade(block *common.Block) bool {
+	bundle, ok := c.configBundleFromBlock(block)
+	if !ok {
+		return false
+	}
+
+	nextOrdererConfig, ok := bundle.OrdererConfig()
+	if !ok {
+		return false
+	}
+
+	transitionTobft, err := c.validateTransitionToSmartbft(nextOrdererConfig)
+	if err != nil {
+		// it should not come here, pre-consensus check should have rejected this transaction
+		c.logger.Panicf("transitionTobft [%v] err: %v", transitionTobft, err)
+	}
+
+	if transitionTobft {
+		return true
+	}
+
+	return false
+}
+
 // writeConfigBlock writes configuration blocks into the ledger in
 // addition extracts updates about raft replica set and if there
 // are changes updates cluster membership as well
@@ -1248,7 +1293,10 @@ func (c *Chain) writeConfigBlock(block *common.Block, index uint64) {
 
 	switch common.HeaderType(hdr.Type) {
 	case common.HeaderType_CONFIG:
-		configMembership := c.detectConfChange(block)
+		var configMembership *MembershipChanges
+		if !c.isConsensusUpgrade(block) {
+			configMembership = c.detectConfChange(block)
+		}
 
 		c.raftMetadataLock.Lock()
 		c.opts.BlockMetadata.RaftIndex = index
@@ -1363,6 +1411,52 @@ func (c *Chain) newConfigMetadata(block *common.Block) *etcdraft.ConfigMetadata 
 	return metadata
 }
 
+// validateTransitionToSmartbft validates the consensus type migration to smartbft, if any.
+// If the new config changes the consensus type to smartbft, it should have empty metadata.
+// Returns
+//
+//	-- transitionTobft bool; true if the new order config has a consensustype transition to smartbft,
+//	-- err error; the error in config metadata for smartbft, if any.
+//
+// It returns (true, nil) in the case of a valid config for transition to smartbft and (true, error) in case
+// the new config has a consensus type change to smartbft, but has invalid metadata.
+// It returns (false, nil) in case the new config doesn't change consensus type to smartbft.
+func (c *Chain) validateTransitionToSmartbft(newOrdererConfig channelconfig.Orderer) (bool, error) {
+	var transitionTobft bool
+	lastConfigBlock, err := lastConfigBlockFromSupport(c.support)
+	if err != nil {
+		return false, err
+	}
+
+	bundle, ok := c.configBundleFromBlock(lastConfigBlock)
+	if !ok {
+		return false, err
+	}
+
+	oldOlderConfig, ok := bundle.OrdererConfig()
+	if !ok {
+		return false, err
+	}
+
+	bftcapability := bundle.ChannelConfig().Capabilities().ConsensusTypeBFT()
+
+	oldOrdererCapabilities := oldOlderConfig.Capabilities()
+	if oldOrdererCapabilities == nil {
+		return transitionTobft, nil
+	}
+
+	if oldOrdererCapabilities.ConsensusTypeMigration() && bftcapability {
+		transitionTobft = newOrdererConfig.ConsensusType() == "smartbft" && oldOlderConfig.ConsensusType() == "etcdraft"
+
+		if transitionTobft {
+			if newOrdererConfig.ConsensusMetadata() != nil {
+				return transitionTobft, errors.New("invalid new config metadata for upgrade to smartbft")
+			}
+		}
+	}
+	return transitionTobft, nil
+}
+
 // ValidateConsensusMetadata determines the validity of a
 // ConsensusMetadata update during config updates on the channel.
 func (c *Chain) ValidateConsensusMetadata(oldOrdererConfig, newOrdererConfig channelconfig.Orderer, newChannel bool) error {
@@ -1381,9 +1475,12 @@ func (c *Chain) ValidateConsensusMetadata(oldOrdererConfig, newOrdererConfig cha
 		return nil
 	}
 
+	if _, err := c.validateTransitionToSmartbft(newOrdererConfig); err != nil {
+		return err
+	}
+
 	if oldOrdererConfig.ConsensusMetadata() == nil {
 		c.logger.Panic("Programming Error: ValidateConsensusMetadata called with nil old metadata")
-		return nil
 	}
 
 	oldMetadata := &etcdraft.ConfigMetadata{}

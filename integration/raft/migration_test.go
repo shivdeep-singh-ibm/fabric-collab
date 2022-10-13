@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package raft
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -19,6 +18,8 @@ import (
 
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric-config/configtx"
+	"github.com/hyperledger/fabric-config/configtx/orderer"
 	"github.com/hyperledger/fabric-protos-go/common"
 	protosorderer "github.com/hyperledger/fabric-protos-go/orderer"
 	protosraft "github.com/hyperledger/fabric-protos-go/orderer/etcdraft"
@@ -872,6 +873,100 @@ func createDeliverEnvelope(n *nwo.Network, signer *nwo.SigningIdentity, blkNum u
 	return env
 }
 
+func applicationChannelGenesisBlockV3(n *nwo.Network, orderers []*nwo.Orderer, peers []*nwo.Peer, channel string) *common.Block {
+	ordererOrgs, consenters := ordererOrganizationsAndConsenters(n, orderers)
+	peerOrgs := peerOrganizations(n, peers)
+
+	channelConfig := configtx.Channel{
+		Orderer: configtx.Orderer{
+			OrdererType:   "etcdraft",
+			Organizations: ordererOrgs,
+			EtcdRaft: orderer.EtcdRaft{
+				Consenters: consenters,
+				Options: orderer.EtcdRaftOptions{
+					TickInterval:         "500ms",
+					ElectionTick:         10,
+					HeartbeatTick:        1,
+					MaxInflightBlocks:    5,
+					SnapshotIntervalSize: 16 * 1024 * 1024, // 16 MB
+				},
+			},
+			Policies: map[string]configtx.Policy{
+				"Readers": {
+					Type: "ImplicitMeta",
+					Rule: "ANY Readers",
+				},
+				"Writers": {
+					Type: "ImplicitMeta",
+					Rule: "ANY Writers",
+				},
+				"Admins": {
+					Type: "ImplicitMeta",
+					Rule: "MAJORITY Admins",
+				},
+				"BlockValidation": {
+					Type: "ImplicitMeta",
+					Rule: "ANY Writers",
+				},
+			},
+			Capabilities: []string{"V2_0"},
+			BatchSize: orderer.BatchSize{
+				MaxMessageCount:   100,
+				AbsoluteMaxBytes:  1024 * 1024,
+				PreferredMaxBytes: 512 * 1024,
+			},
+			BatchTimeout: 2 * time.Second,
+			State:        "STATE_NORMAL",
+		},
+		Application: configtx.Application{
+			Organizations: peerOrgs,
+			Capabilities:  []string{"V2_0"},
+			Policies: map[string]configtx.Policy{
+				"Readers": {
+					Type: "ImplicitMeta",
+					Rule: "ANY Readers",
+				},
+				"Writers": {
+					Type: "ImplicitMeta",
+					Rule: "ANY Writers",
+				},
+				"Admins": {
+					Type: "ImplicitMeta",
+					Rule: "MAJORITY Admins",
+				},
+				"Endorsement": {
+					Type: "ImplicitMeta",
+					Rule: "MAJORITY Endorsement",
+				},
+				"LifecycleEndorsement": {
+					Type: "ImplicitMeta",
+					Rule: "MAJORITY Endorsement",
+				},
+			},
+		},
+		Capabilities: []string{"V3_0"},
+		Policies: map[string]configtx.Policy{
+			"Readers": {
+				Type: "ImplicitMeta",
+				Rule: "ANY Readers",
+			},
+			"Writers": {
+				Type: "ImplicitMeta",
+				Rule: "ANY Writers",
+			},
+			"Admins": {
+				Type: "ImplicitMeta",
+				Rule: "MAJORITY Admins",
+			},
+		},
+	}
+
+	genesisBlock, err := configtx.NewApplicationChannelGenesisBlock(channelConfig, channel)
+	Expect(err).NotTo(HaveOccurred())
+
+	return genesisBlock
+}
+
 var _ = Describe("Raft2SmartBFTMigration", func() {
 	var (
 		testDir          string
@@ -900,17 +995,15 @@ var _ = Describe("Raft2SmartBFTMigration", func() {
 		os.RemoveAll(testDir)
 	})
 
-	/*
-		restartOrderer := func(o *nwo.Orderer, index int) {
-			ordererProcesses[index].Signal(syscall.SIGKILL)
-			Eventually(ordererProcesses[index].Wait(), network.EventuallyTimeout).Should(Receive(MatchError("exit status 137")))
-			ordererRunner := network.OrdererRunner(o)
-			ordererProcess := ifrit.Invoke(ordererRunner)
-			Eventually(ordererProcess.Ready(), network.EventuallyTimeout).Should(BeClosed())
-			ordererProcesses[index] = ordererProcess
-			ordererRunners[index] = ordererRunner
-		}
-	*/
+	restartOrderer := func(o *nwo.Orderer, index int) {
+		ordererProcesses[index].Signal(syscall.SIGKILL)
+		Eventually(ordererProcesses[index].Wait(), network.EventuallyTimeout).Should(Receive(MatchError("exit status 137")))
+		ordererRunner := network.OrdererRunner(o)
+		ordererProcess := ifrit.Invoke(ordererRunner)
+		Eventually(ordererProcess.Ready(), network.EventuallyTimeout).Should(BeClosed())
+		ordererProcesses[index] = ordererProcess
+		ordererRunners[index] = ordererRunner
+	}
 
 	Describe("Raft to SmartBFT migration", func() {
 		startOrderer := func(o *nwo.Orderer) {
@@ -959,7 +1052,7 @@ var _ = Describe("Raft2SmartBFTMigration", func() {
 					Expect(cl).To(Equal(channelparticipation.ChannelList{}))
 				}
 
-				genesisBlock := applicationChannelGenesisBlock(network, consenters, []*nwo.Peer{peer}, channel)
+				genesisBlock := applicationChannelGenesisBlockV3(network, consenters, []*nwo.Peer{peer}, channel)
 				expectedChannelInfoPT := channelparticipation.ChannelInfo{
 					Name:              channel,
 					URL:               channelURL,
@@ -995,49 +1088,24 @@ var _ = Describe("Raft2SmartBFTMigration", func() {
 
 			Context("when updrading from raft to smartbft", func() {
 				var oldConsensusType, newConsensusType string
+				oldConsensusType = "etcdraft"
+				newConsensusType = "smartbft"
+
+				getRaftMetaDataFromConfig := func() []byte {
+					config_ := nwo.GetConfig(network, peer, orderer1, channel)
+					consensusTypeValue_ := extractOrdererConsensusType(config_)
+					oldMetadata := consensusTypeValue_.Metadata
+					return oldMetadata
+				}
 
 				It("1) executes raft2smartbft green path", func() {
-					oldConsensusType = "etcdraft"
-					newConsensusType = "smartbft"
-
-					prepareConsensusTransition := func(o *nwo.Orderer,
-						oldType string,
-						newType string,
-						oldState protosorderer.ConsensusType_State,
-						newState protosorderer.ConsensusType_State,
-						oldMetaData []byte, // if unknown, can be set to nil while setting newMetadata to non-nil value
-						newMetaData []byte,
-					) (*common.Config, *common.Config) {
-						current := nwo.GetConfig(network, peer, o, channel)
-						updated := proto.Clone(current).(*common.Config)
-						consensusTypeValue := extractOrdererConsensusType(current)
-						validateConsensusTypeValue(consensusTypeValue, oldType, oldState)
-
-						consensusTypeValue.Type = newType
-						consensusTypeValue.State = newState
-
-						// change metadata if oldMetadata and newMetaData are different
-						if !bytes.Equal(oldMetaData, newMetaData) {
-							consensusTypeValue.Metadata = newMetaData
-						}
-
-						updated.ChannelGroup.Groups["Orderer"].Values["ConsensusType"] = &common.ConfigValue{
-							ModPolicy: "Admins",
-							Value:     protoutil.MarshalOrPanic(consensusTypeValue),
-						}
-
-						return current, updated
-					}
-
 					By("1) Config update on standard channel, State=MAINTENANCE, enter maintenance-mode")
 
-					current, updated := prepareConsensusTransition(orderer1,
-						oldConsensusType,
-						oldConsensusType,
-						protosorderer.ConsensusType_STATE_NORMAL,
-						protosorderer.ConsensusType_STATE_MAINTENANCE,
-						[]byte{},
-						[]byte{})
+					oldRaftMetadata := getRaftMetaDataFromConfig()
+
+					current, updated := prepareTransition(network, peer, orderer1, channel,
+						oldConsensusType, protosorderer.ConsensusType_STATE_NORMAL,
+						oldConsensusType, oldRaftMetadata, protosorderer.ConsensusType_STATE_MAINTENANCE)
 
 					nwo.UpdateOrdererConfig(network,
 						orderer1,
@@ -1061,14 +1129,17 @@ var _ = Describe("Raft2SmartBFTMigration", func() {
 						assertTxFailed(network, o, channel)
 					}
 
-					By("2) Config update to migrate to smartbft")
-					current, updated = prepareConsensusTransition(orderer1,
-						oldConsensusType,
-						newConsensusType,
-						protosorderer.ConsensusType_STATE_MAINTENANCE,
-						protosorderer.ConsensusType_STATE_MAINTENANCE,
-						[]byte{},
-						[]byte{})
+					By("2) Verify: Config update to migrate to smartbft with non empty metadata fails")
+					assertTransitionFailed(
+						network, peer, orderer1, channel, // Auxiliary
+						oldConsensusType, protosorderer.ConsensusType_STATE_MAINTENANCE, // From
+						newConsensusType, oldRaftMetadata, protosorderer.ConsensusType_STATE_MAINTENANCE) // To
+
+					std2EntryBlockNum := nwo.CurrentConfigBlockNumber(network, peer, orderer1, channel)
+					By("2) Config update to migrate to smartbft, State=MAINTENANCE, Type=smartbft, Metadata=nil")
+					current, updated = prepareTransition(network, peer, orderer1, channel,
+						oldConsensusType, protosorderer.ConsensusType_STATE_MAINTENANCE,
+						newConsensusType, nil, protosorderer.ConsensusType_STATE_MAINTENANCE)
 
 					nwo.UpdateOrdererConfig(network,
 						orderer1,
@@ -1077,6 +1148,10 @@ var _ = Describe("Raft2SmartBFTMigration", func() {
 						updated,
 						peer,
 						orderer1, orderer2, orderer3)
+
+					By("2) Verify: Config Update has been successful")
+					std2BlockNum := nwo.CurrentConfigBlockNumber(network, peer, orderer1, channel)
+					Expect(std2BlockNum).To(Equal(std2EntryBlockNum + 1))
 
 					By("2) Verify: Normal TX's on standard channel are blocked")
 
@@ -1084,41 +1159,30 @@ var _ = Describe("Raft2SmartBFTMigration", func() {
 						assertTxFailed(network, o, channel)
 					}
 
-					std2EntryBlockNum := nwo.CurrentConfigBlockNumber(network, peer, orderer1, channel)
-					By("3) Verify: everse migrating to etcdraft on standard channel is allowed")
-
-					current, updated = prepareConsensusTransition(orderer1,
-						newConsensusType,
-						oldConsensusType,
-						protosorderer.ConsensusType_STATE_MAINTENANCE,
-						protosorderer.ConsensusType_STATE_MAINTENANCE,
-						[]byte{},
-						[]byte{})
-
-					nwo.UpdateOrdererConfig(network,
-						orderer1,
-						channel,
-						current,
-						updated,
-						peer,
-						orderer1, orderer2, orderer3)
-
-					By("3) Verify: standard channel config changed")
-					std2BlockNum := nwo.CurrentConfigBlockNumber(network, peer, orderer1, channel)
-					Expect(std2BlockNum).To(Equal(std2EntryBlockNum + 1))
-
-					By("3) Verify: delivery request from peer is blocked")
+					By("2) Verify: delivery request from peer is blocked")
 					err := checkPeerDeliverRequest(orderer1, peer, network, channel)
 					Expect(err).To(MatchError(errors.New("FORBIDDEN")))
 
-					By("4) Give consensus request to migrate to smartbft")
-					current, updated = prepareConsensusTransition(orderer1,
-						oldConsensusType,
-						newConsensusType,
-						protosorderer.ConsensusType_STATE_MAINTENANCE,
-						protosorderer.ConsensusType_STATE_MAINTENANCE,
-						[]byte{},
-						[]byte{})
+					By("Raft node goes to standby mode on all nodes")
+
+					By("3) Restart All nodes")
+
+					for i, o := range orderers {
+						restartOrderer(o, i)
+					}
+				})
+				It("executes raft2smartbft forbidden transitions", func() {
+					oldRaftMetadata := getRaftMetaDataFromConfig()
+
+					By("1) Config update on standard channel, changing both ConsensusType State & Type is forbidden")
+					assertTransitionFailed(
+						network, peer, orderer1, channel, // Auxiliary
+						oldConsensusType, protosorderer.ConsensusType_STATE_NORMAL, // From
+						newConsensusType, oldRaftMetadata, protosorderer.ConsensusType_STATE_MAINTENANCE) // To
+
+					current, updated := prepareTransition(network, peer, orderer1, channel,
+						oldConsensusType, protosorderer.ConsensusType_STATE_NORMAL,
+						oldConsensusType, oldRaftMetadata, protosorderer.ConsensusType_STATE_MAINTENANCE)
 
 					nwo.UpdateOrdererConfig(network,
 						orderer1,
@@ -1128,41 +1192,36 @@ var _ = Describe("Raft2SmartBFTMigration", func() {
 						peer,
 						orderer1, orderer2, orderer3)
 
-					std2BlockNum = nwo.CurrentConfigBlockNumber(network, peer, orderer1, channel)
-					Expect(std2BlockNum).To(Equal(std2EntryBlockNum + 2))
+					By("1) Verify: Normal TX's on standard channel are blocked")
 
-					By("4) Update consensus metadata in smartbft to empty")
-					/*
-						// TODO: Setting metadata empty causesa panic
-						// it tries to interpret it as a transaction trying to remove
-						// all consenters at once
-						raftMetadata := prepareRaftMetadata(network)
-						smartbftmetaData := []byte{}
+					for _, o := range orderers {
+						assertTxFailed(network, o, channel)
+					}
 
-						current, updated = prepareConsensusTransition(orderer1,
-							newConsensusType,
-							newConsensusType,
-							protosorderer.ConsensusType_STATE_MAINTENANCE,
-							protosorderer.ConsensusType_STATE_MAINTENANCE,
-							raftMetadata,
-							smartbftmetaData)
+					By("2) Verify: Config update to migrate to smartbft with non empty metadata fails")
+					assertTransitionFailed(
+						network, peer, orderer1, channel, // Auxiliary
+						oldConsensusType, protosorderer.ConsensusType_STATE_MAINTENANCE, // From
+						newConsensusType, oldRaftMetadata, protosorderer.ConsensusType_STATE_MAINTENANCE) // To
 
-						nwo.UpdateOrdererConfig(network,
-							orderer1,
-							channel,
-							current,
-							updated,
-							peer,
-							orderer1, orderer2, orderer3)
-					*/
-					By("Raft node goes to standby mode on all nodes")
+					By("3) Config update to migrate to smartbft, State=MAINTENANCE, Type=smartbft, Metadata=nil")
+					current, updated = prepareTransition(network, peer, orderer1, channel,
+						oldConsensusType, protosorderer.ConsensusType_STATE_MAINTENANCE,
+						newConsensusType, nil, protosorderer.ConsensusType_STATE_MAINTENANCE)
 
-					By("Restart All nodes")
-					/*
-						for i, o := range orderers {
-							restartOrderer(o, i)
-						}
-					*/
+					nwo.UpdateOrdererConfig(network,
+						orderer1,
+						channel,
+						current,
+						updated,
+						peer,
+						orderer1, orderer2, orderer3)
+
+					By("3) Config update to reverse transition from smartbft to etcdraft is forbidden")
+					assertTransitionFailed(
+						network, peer, orderer1, channel, // Auxiliary
+						newConsensusType, protosorderer.ConsensusType_STATE_MAINTENANCE, // From
+						oldConsensusType, oldRaftMetadata, protosorderer.ConsensusType_STATE_MAINTENANCE) // To
 				})
 			})
 		})
