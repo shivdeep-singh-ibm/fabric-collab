@@ -316,21 +316,29 @@ Orderer: &OrdererDefaults
       Port: 7050
       MSPID: OrdererOrg1
       Identity: /path/to/identity
+      ClientTLSCert: path/to/ClientTLSCert1
+      ServerTLSCert: path/to/ServerTLSCert1
     - ID: 2
       Host: bft1.example.com
       Port: 7050
       MSPID: OrdererOrg2
       Identity: /path/to/identity
+      ClientTLSCert: path/to/ClientTLSCert2
+      ServerTLSCert: path/to/ServerTLSCert2
     - ID: 3
       Host: bft2.example.com
       Port: 7050
       MSPID: OrdererOrg3
       Identity: /path/to/identity
+      ClientTLSCert: path/to/ClientTLSCert3
+      ServerTLSCert: path/to/ServerTLSCert3
     - ID: 4
       Host: bft3.example.com
       Port: 7050
       MSPID: OrdererOrg4
       Identity: /path/to/identity
+      ClientTLSCert: path/to/ClientTLSCert4
+      ServerTLSCert: path/to/ServerTLSCert4
 
     Kafka:
         # Brokers: A list of Kafka brokers to which the orderer connects. Edit
@@ -387,6 +395,11 @@ Orderer: &OrdererDefaults
 
             # SnapshotIntervalSize defines number of bytes per which a snapshot is taken
             SnapshotIntervalSize: 16 MB
+
+    # SmartBFT defines configuration which must be set when the "BFT"
+    # orderertype is chosen.
+    SmartBFT:
+            ViewChangeResendInterval: 500ms
 
     # Organizations lists the orgs participating on the orderer side of the
     # network.
@@ -660,3 +673,49 @@ Profiles:
                       Admins:
                           Type: Signature
                           Rule: "OR('SampleOrg.member')"
+
+# SampleDevModeSmartBFT defines a configuration that differs from the
+    # SampleDevModeSolo one only in that it uses the Smart BFT orderer.
+    SampleDevModeSmartBFT:
+        <<: *ChannelDefaults
+        Orderer:
+            <<: *OrdererDefaults
+            Policies:
+                Readers:
+                    Type: ImplicitMeta
+                    Rule: ANY Readers
+                Writers:
+                    Type: ImplicitMeta
+                    Rule: ANY Writers
+                Admins:
+                    Type: ImplicitMeta
+                    Rule: MAJORITY Admins
+                BlockValidation:
+                    Type: ImplicitMeta
+                    Rule: ANY Writers
+            OrdererType: BFT
+            Organizations:
+                - <<: *SampleOrg
+                  Policies:
+                      <<: *SampleOrgPolicies
+                      Admins:
+                          Type: Signature
+                          Rule: "OR('SampleOrg.member')"
+        Application:
+            <<: *ApplicationDefaults
+            Organizations:
+                - <<: *SampleOrg
+                  Policies:
+                      <<: *SampleOrgPolicies
+                      Admins:
+                          Type: Signature
+                          Rule: "OR('SampleOrg.member')"
+        Consortiums:
+            SampleConsortium:
+                Organizations:
+                    - <<: *SampleOrg
+                      Policies:
+                          <<: *SampleOrgPolicies
+                          Admins:
+                              Type: Signature
+                              Rule: "OR('SampleOrg.member')"

@@ -7,10 +7,14 @@ SPDX-License-Identifier: Apache-2.0
 package genesisconfig
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/hyperledger/fabric-protos-go/orderer/etcdraft"
+	"github.com/hyperledger/fabric-protos-go/orderer/smartbft"
 	"github.com/hyperledger/fabric/common/viperutil"
 	"github.com/hyperledger/fabric/core/config/configtest"
 	"github.com/stretchr/testify/require"
@@ -26,12 +30,24 @@ func TestLoadProfile(t *testing.T) {
 		SampleSingleMSPChannelProfile,
 		SampleSingleMSPKafkaProfile,
 		SampleSingleMSPSoloProfile,
+		SampleDevModeSmartBFTProfile,
 	}
 	for _, pName := range pNames {
 		t.Run(pName, func(t *testing.T) {
 			p := Load(pName)
 			require.NotNil(t, p, "profile should not be nil")
 		})
+	}
+}
+
+func TestLoadBFTProfile(t *testing.T) {
+	cleanup := configtest.SetDevFabricConfigPath(t)
+	defer cleanup()
+
+	p := Load(SampleDevModeSmartBFTProfile)
+	assert.NotNil(t, p, "profile should not be nil")
+	for polN, pol := range p.Orderer.Policies {
+		fmt.Printf("%s %s \n", polN, pol)
 	}
 }
 
@@ -44,6 +60,7 @@ func TestLoadProfileWithPath(t *testing.T) {
 		SampleSingleMSPChannelProfile,
 		SampleSingleMSPKafkaProfile,
 		SampleSingleMSPSoloProfile,
+		SampleDevModeSmartBFTProfile,
 	}
 	for _, pName := range pNames {
 		t.Run(pName, func(t *testing.T) {
@@ -179,12 +196,12 @@ func TestConsensusSpecificInit(t *testing.T) {
 						ClientTlsCert: []byte("path/to/client/cert"),
 						ServerTlsCert: []byte("path/to/server/cert"),
 					},
-					{ // missing ClientTlsCert
+					{ // missing ClientTLSCert
 						Host:          "node-1.example.com",
 						Port:          7050,
 						ServerTlsCert: []byte("path/to/server/cert"),
 					},
-					{ // missing ServerTlsCert
+					{ // missing ServerTLSCert
 						Host:          "node-1.example.com",
 						Port:          7050,
 						ClientTlsCert: []byte("path/to/client/cert"),
@@ -265,6 +282,123 @@ func TestConsensusSpecificInit(t *testing.T) {
 				require.Panics(t, func() {
 					profile.completeInitialization(devConfigDir)
 				})
+			})
+		})
+	})
+
+	t.Run("smartbft", func(t *testing.T) {
+		makeProfile := func(consenters []*Consenter, options *smartbft.Options) *Profile {
+			return &Profile{
+				Orderer: &Orderer{
+					OrdererType:      "BFT",
+					ConsenterMapping: consenters,
+					SmartBFT:         options,
+				},
+			}
+		}
+
+		t.Run("No Smart BFT configuration provided", func(t *testing.T) {
+			profile := makeProfile(nil, nil)
+			profile.Orderer.SmartBFT = nil
+
+			require.Panics(t, func() {
+				profile.completeInitialization(devConfigDir)
+			})
+		})
+
+		t.Run("nil consenter set", func(t *testing.T) { // should panic
+			profile := makeProfile(nil, nil)
+
+			require.Panics(t, func() {
+				profile.completeInitialization(devConfigDir)
+			})
+		})
+
+		t.Run("single consenter", func(t *testing.T) {
+			consenters := []*Consenter{
+				{
+					Host:          "node-1.example.com",
+					Port:          7050,
+					ClientTLSCert: "path/to/client/cert",
+					ServerTLSCert: "path/to/server/cert",
+					MSPID:         "Org1",
+					Identity:      "path/to/indentity/cert",
+				},
+			}
+
+			t.Run("invalid consenters specification", func(t *testing.T) {
+				failingConsenterSpecifications := []*Consenter{
+					{ // missing Host
+						Port:          7050,
+						ClientTLSCert: "path/to/client/cert",
+						ServerTLSCert: "path/to/server/cert",
+						MSPID:         "Org1",
+						Identity:      "path/to/indentity/cert",
+					},
+					{ // missing Port
+						Port:          7050,
+						ClientTLSCert: "path/to/client/cert",
+						ServerTLSCert: "path/to/server/cert",
+						MSPID:         "Org1",
+						Identity:      "path/to/indentity/cert",
+					},
+					{ // missing ClientTLSCert
+						Host:          "node-1.example.com",
+						Port:          7050,
+						ServerTLSCert: "path/to/server/cert",
+						MSPID:         "Org1",
+						Identity:      "path/to/indentity/cert",
+					},
+					{ // missing ServerTLSCert
+						Host:          "node-1.example.com",
+						Port:          7050,
+						ClientTLSCert: "path/to/client/cert",
+						MSPID:         "Org1",
+						Identity:      "path/to/indentity/cert",
+					},
+					{ // missing identity cert
+						Host:          "node-1.example.com",
+						Port:          7050,
+						ClientTLSCert: "path/to/client/cert",
+						ServerTLSCert: "path/to/server/cert",
+						MSPID:         "Org1",
+					},
+					{ // missing msp id
+						Host:          "node-1.example.com",
+						Port:          7050,
+						ClientTLSCert: "path/to/client/cert",
+						ServerTLSCert: "path/to/server/cert",
+						Identity:      "path/to/indentity/cert",
+					},
+				}
+
+				for _, consenter := range failingConsenterSpecifications {
+					profile := makeProfile([]*Consenter{consenter}, nil)
+
+					require.Panics(t, func() {
+						profile.completeInitialization(devConfigDir)
+					})
+				}
+			})
+
+			t.Run("nil Options", func(t *testing.T) {
+				profile := makeProfile(consenters, nil)
+				profile.completeInitialization(devConfigDir)
+
+				// need not be tested in subsequent tests
+				require.NotNil(t, profile.Orderer.SmartBFT, "SmartBFT config settings should be set")
+				require.Equal(t, profile.Orderer.ConsenterMapping[0].ClientTLSCert, consenters[0].ClientTLSCert,
+					"Client TLS cert path should be correctly set")
+				require.Equal(t, profile.Orderer.ConsenterMapping[0].ServerTLSCert, consenters[0].ServerTLSCert,
+					"Server TLS cert path should be correctly set")
+				require.Equal(t, profile.Orderer.ConsenterMapping[0].Identity, consenters[0].Identity,
+					"Consenter identity cert path should be correctly set")
+				require.Equal(t, profile.Orderer.ConsenterMapping[0].MSPID, consenters[0].MSPID,
+					"Consenter MSP ID should be correctly set")
+
+				// specific assertion for this test context
+				require.Equal(t, profile.Orderer.SmartBFT, genesisDefaults.Orderer.SmartBFT,
+					"Options should be set to the default value")
 			})
 		})
 	})

@@ -16,6 +16,7 @@ import (
 	cb "github.com/hyperledger/fabric-protos-go/common"
 	ab "github.com/hyperledger/fabric-protos-go/orderer"
 	"github.com/hyperledger/fabric-protos-go/orderer/etcdraft"
+	"github.com/hyperledger/fabric-protos-go/orderer/smartbft"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/internal/configtxgen/encoder"
 	"github.com/hyperledger/fabric/internal/configtxgen/encoder/fakes"
@@ -446,40 +447,72 @@ var _ = Describe("Encoder", func() {
 		Context("when the consensus type is BFT", func() {
 			BeforeEach(func() {
 				conf.OrdererType = "BFT"
-				conf.ConsenterMapping = []*genesisconfig.Consenter{
-					{
-						ID:    1,
-						Host:  "host1",
-						Port:  1001,
-						MSPID: "MSP1",
-					},
-					{
-						ID:            2,
-						Host:          "host2",
-						Port:          1002,
-						MSPID:         "MSP2",
-						ClientTLSCert: "../../../sampleconfig/msp/admincerts/admincert.pem",
-						ServerTLSCert: "../../../sampleconfig/msp/admincerts/admincert.pem",
-						Identity:      "../../../sampleconfig/msp/admincerts/admincert.pem",
-					},
+				conf.SmartBFT = &smartbft.Options{
+					RequestBatchMaxCount:      uint64(100),
+					RequestBatchMaxBytes:      uint64(1000000),
+					RequestBatchMaxInterval:   "50ms",
+					IncomingMessageBufferSize: uint64(200),
+					RequestPoolSize:           uint64(400),
+					RequestForwardTimeout:     "2s",
+					RequestComplainTimeout:    "10s",
+					RequestAutoRemoveTimeout:  "1m",
+					ViewChangeResendInterval:  "5s",
+					ViewChangeTimeout:         "20s",
+					LeaderHeartbeatTimeout:    "30s",
+					LeaderHeartbeatCount:      uint64(10),
+					CollectTimeout:            "1m",
+					SyncOnStart:               false,
+					SpeedUpViewChange:         false,
 				}
 			})
 
-			It("adds the Orderers key", func() {
+			It("adds the BFT options", func() {
 				cg, err := encoder.NewOrdererGroup(conf)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(len(cg.Values)).To(Equal(6))
-				Expect(cg.Values["Orderers"]).NotTo(BeNil())
-				orderersType := &cb.Orderers{}
-				err = proto.Unmarshal(cg.Values["Orderers"].Value, orderersType)
+				consensusType := &ab.ConsensusType{}
+				err = proto.Unmarshal(cg.Values["ConsensusType"].Value, consensusType)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(len(orderersType.ConsenterMapping)).To(Equal(2))
-				consenter1 := orderersType.ConsenterMapping[0]
-				Expect(consenter1.Id).To(Equal(uint32(1)))
-				Expect(consenter1.ClientTlsCert).To(BeNil())
-				consenter2 := orderersType.ConsenterMapping[1]
-				Expect(consenter2.Id).To(Equal(uint32(2)))
-				Expect(consenter2.ClientTlsCert).ToNot(BeNil())
+				Expect(consensusType.Type).To(Equal("BFT"))
+				options := &smartbft.Options{}
+				err = proto.Unmarshal(consensusType.Metadata, options)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(options.RequestBatchMaxCount).To(Equal(uint64(100)))
+				Expect(options.RequestBatchMaxBytes).To(Equal(uint64(1000000)))
+				Expect(options.RequestBatchMaxInterval).To(Equal("50ms"))
+				Expect(options.IncomingMessageBufferSize).To(Equal(uint64(200)))
+				Expect(options.RequestPoolSize).To(Equal(uint64(400)))
+				Expect(options.RequestForwardTimeout).To(Equal("2s"))
+				Expect(options.RequestComplainTimeout).To(Equal("10s"))
+				Expect(options.RequestAutoRemoveTimeout).To(Equal("1m"))
+				Expect(options.ViewChangeResendInterval).To(Equal("5s"))
+				Expect(options.ViewChangeTimeout).To(Equal("20s"))
+				Expect(options.LeaderHeartbeatTimeout).To(Equal("30s"))
+				Expect(options.LeaderHeartbeatCount).To(Equal(uint64(10)))
+				Expect(options.CollectTimeout).To(Equal("1m"))
+				Expect(options.SyncOnStart).To(Equal(false))
+				Expect(options.SpeedUpViewChange).To(Equal(false))
+
+			})
+
+			Context("when the smartbft configuration is bad", func() {
+				BeforeEach(func() {
+					conf.ConsenterMapping = []*genesisconfig.Consenter{{
+						ID:            0,
+						Host:          "",
+						Port:          0,
+						MSPID:         "",
+						Identity:      "",
+						ClientTLSCert: "/some/path",
+					}}
+					conf.SmartBFT = &smartbft.Options{}
+				})
+
+				It("wraps and returns the error", func() {
+					_, err := encoder.NewOrdererGroup(conf)
+					Expect(err).To(MatchError("cannot load consenter config for orderer type BFT: cannot load client cert for consenter :0: open /some/path: no such file or directory"))
+				})
 			})
 		})
 
