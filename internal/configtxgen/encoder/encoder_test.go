@@ -493,7 +493,6 @@ var _ = Describe("Encoder", func() {
 				Expect(options.CollectTimeout).To(Equal("1m"))
 				Expect(options.SyncOnStart).To(Equal(false))
 				Expect(options.SpeedUpViewChange).To(Equal(false))
-
 			})
 
 			Context("when the smartbft configuration is bad", func() {
