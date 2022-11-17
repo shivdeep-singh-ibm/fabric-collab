@@ -60,6 +60,9 @@ const (
 	ImplicitMetaPolicyType = "ImplicitMeta"
 )
 
+// export
+var AddValue = addValue
+
 func addValue(cg *cb.ConfigGroup, value channelconfig.ConfigValue, modPolicy string) {
 	cg.Values[value.Key()] = &cb.ConfigValue{
 		Value:     protoutil.MarshalOrPanic(value.Value()),
