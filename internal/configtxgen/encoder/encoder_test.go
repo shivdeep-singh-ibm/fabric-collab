@@ -446,7 +446,7 @@ var _ = Describe("Encoder", func() {
 
 		Context("when the consensus type is BFT", func() {
 			BeforeEach(func() {
-				conf.OrdererType = "BFT"
+				conf.OrdererType = "smartbft"
 				conf.SmartBFT = &smartbft.Options{
 					RequestBatchMaxCount:      uint64(100),
 					RequestBatchMaxBytes:      uint64(1000000),
@@ -473,7 +473,7 @@ var _ = Describe("Encoder", func() {
 				consensusType := &ab.ConsensusType{}
 				err = proto.Unmarshal(cg.Values["ConsensusType"].Value, consensusType)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(consensusType.Type).To(Equal("BFT"))
+				Expect(consensusType.Type).To(Equal("smartbft"))
 				options := &smartbft.Options{}
 				err = proto.Unmarshal(consensusType.Metadata, options)
 				Expect(err).NotTo(HaveOccurred())
@@ -510,7 +510,7 @@ var _ = Describe("Encoder", func() {
 
 				It("wraps and returns the error", func() {
 					_, err := encoder.NewOrdererGroup(conf)
-					Expect(err).To(MatchError("cannot load consenter config for orderer type BFT: cannot load client cert for consenter :0: open /some/path: no such file or directory"))
+					Expect(err).To(MatchError("cannot load consenter config for orderer type smartbft: cannot load client cert for consenter :0: open /some/path: no such file or directory"))
 				})
 			})
 		})

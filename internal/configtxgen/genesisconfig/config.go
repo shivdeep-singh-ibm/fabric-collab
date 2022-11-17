@@ -27,7 +27,7 @@ const (
 	EtcdRaft = "etcdraft"
 
 	// The type key for BFT Smart consensus
-	SmartBFT = "BFT"
+	SmartBFT = "smartbft"
 )
 
 var logger = flogging.MustGetLogger("common.tools.configtxgen.localconfig")

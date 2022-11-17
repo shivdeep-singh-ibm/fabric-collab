@@ -396,7 +396,7 @@ Orderer: &OrdererDefaults
             # SnapshotIntervalSize defines number of bytes per which a snapshot is taken
             SnapshotIntervalSize: 16 MB
 
-    # SmartBFT defines configuration which must be set when the "BFT"
+    # SmartBFT defines configuration which must be set when the "smartbft"
     # orderertype is chosen.
     SmartBFT:
             ViewChangeResendInterval: 500ms
@@ -675,7 +675,7 @@ Profiles:
                           Rule: "OR('SampleOrg.member')"
 
 # SampleDevModeSmartBFT defines a configuration that differs from the
-    # SampleDevModeSolo one only in that it uses the Smart BFT orderer.
+    # SampleDevModeSolo one only in that it uses the smartbft orderer.
     SampleDevModeSmartBFT:
         <<: *ChannelDefaults
         Orderer:
@@ -693,7 +693,7 @@ Profiles:
                 BlockValidation:
                     Type: ImplicitMeta
                     Rule: ANY Writers
-            OrdererType: BFT
+            OrdererType: smartbft
             Organizations:
                 - <<: *SampleOrg
                   Policies:
