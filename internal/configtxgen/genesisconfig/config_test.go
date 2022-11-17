@@ -290,7 +290,7 @@ func TestConsensusSpecificInit(t *testing.T) {
 		makeProfile := func(consenters []*Consenter, options *smartbft.Options) *Profile {
 			return &Profile{
 				Orderer: &Orderer{
-					OrdererType:      "BFT",
+					OrdererType:      "smartbft",
 					ConsenterMapping: consenters,
 					SmartBFT:         options,
 				},
