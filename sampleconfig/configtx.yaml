@@ -400,6 +400,21 @@ Orderer: &OrdererDefaults
     # orderertype is chosen.
     SmartBFT:
             ViewChangeResendInterval: 500ms
+            RequestBatchMaxCount:      100
+            RequestBatchMaxBytes:      100000
+            RequestBatchMaxInterval:   50ms
+            IncomingMessageBufferSize: 200
+            RequestPoolSize:           400
+            RequestForwardTimeout:     2s
+            RequestComplainTimeout:    10s
+            RequestAutoRemoveTimeout:  1m
+            ViewChangeResendInterval:  5s
+            ViewChangeTimeout:         20s
+            LeaderHeartbeatTimeout:    30s
+            LeaderHeartbeatCount:      10
+            CollectTimeout:            1m
+            SyncOnStart:               false
+            SpeedUpViewChange:         false
 
     # Organizations lists the orgs participating on the orderer side of the
     # network.

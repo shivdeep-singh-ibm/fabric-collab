@@ -444,11 +444,6 @@ loop:
 			c.ServerTlsCert = []byte(serverCertPath)
 		}
 	case SmartBFT:
-		/*
-			if ord.SmartBFT == nil {
-				logger.Panicf("%s configuration missing", SmartBFT)
-			}
-		*/
 		if ord.SmartBFT == nil {
 			logger.Infof("Orderer.SmartBFT.Options unset, setting to %v", genesisDefaults.Orderer.SmartBFT)
 			ord.SmartBFT = genesisDefaults.Orderer.SmartBFT
