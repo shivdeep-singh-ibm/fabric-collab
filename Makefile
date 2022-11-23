@@ -13,6 +13,7 @@
 #   - clean-all - superset of 'clean' that also removes persistent state
 #   - clean - cleans the build area
 #   - configtxgen - builds a native configtxgen binary
+# . - configtxgen-bft - builds a native configtxgen binary for bft consensus
 #   - configtxlator - builds a native configtxlator binary
 #   - cryptogen - builds a native cryptogen binary
 #   - desk-check - runs linters and verify to test changed packages
@@ -84,9 +85,10 @@ GO_TAGS ?=
 RELEASE_EXES = orderer $(TOOLS_EXES)
 RELEASE_IMAGES = baseos ccenv orderer peer tools
 RELEASE_PLATFORMS = darwin-amd64 linux-amd64 windows-amd64
-TOOLS_EXES = configtxgen configtxlator cryptogen discover ledgerutil osnadmin peer
+TOOLS_EXES = configtxgen-bft configtxgen configtxlator cryptogen discover ledgerutil osnadmin peer
 
 pkgmap.configtxgen    := $(PKGNAME)/cmd/configtxgen
+pkgmap.configtxgen-bft    := $(PKGNAME)/cmd/configtxgen-bft
 pkgmap.configtxlator  := $(PKGNAME)/cmd/configtxlator
 pkgmap.cryptogen      := $(PKGNAME)/cmd/cryptogen
 pkgmap.discover       := $(PKGNAME)/cmd/discover
@@ -223,6 +225,8 @@ tools: $(TOOLS_EXES)
 $(RELEASE_EXES): %: $(BUILD_DIR)/bin/%
 
 $(BUILD_DIR)/bin/%: GO_LDFLAGS = $(METADATA_VAR:%=-X $(PKGNAME)/common/metadata.%)
+$(BUILD_DIR)/bin/configtxgen-bft: GO_TAGS += bft
+$(BUILD_DIR)/bin/configtxgen: GO_TAGS += etcdraft
 $(BUILD_DIR)/bin/%:
 	@echo "Building $@"
 	@mkdir -p $(@D)
